@@ -28,27 +28,45 @@ mod tests {
 
             let geojson_result = file_contents.parse::<GeoJson>();
 
-            // match geojson_result {
-            //     Ok(geojson) => println!(">> parse success! file: {}", &path_str),
-            //     Err(error) => {
-            //         println!(">> parse failure! file: {} error: {}", &path_str, &error);
-            //         // FIXME actually fail here.
-            //         // TODO wrap in custom error, attaching failing file
-            //         //assert!(false)
-            //     }
-            // };
+            match geojson_result {
+                Ok(geojson) => {
+                    println!(">> parse success! file: {}", &path_str);
 
-            let geojson_string = geojson_result.unwrap().to_string();
+                    // Now that we've successfully decoded the geojson, re-encode it
+                    // to and compare to the original to make sure nothing was lost.
+                    let geojson_string = geojson.to_string();
 
-            let original_json: serde_json::Value = serde_json::from_str(&file_contents).unwrap();
-            let roundtrip_json: serde_json::Value = serde_json::from_str(&geojson_string).unwrap();
+                    let original_json: serde_json::Value = serde_json::from_str(&file_contents).unwrap();
+                    let roundtrip_json: serde_json::Value = serde_json::from_str(&geojson_string).unwrap();
 
-            if (original_json == roundtrip_json) {
-                println!(">> roundtrip success! file: {}", &path_str);
-            } else {
-                println!(">> roundtrip failure! file: {}", &path_str);
-            }
-            //assert_eq!(original_json, roundtrip_json);
+                    if original_json == roundtrip_json {
+                        println!(">> roundtrip success! file: {}", &path_str);
+                    } else {
+                        println!("<<< roundtrip failure! file: {}", &path_str);
+                        println!("<<< roundtrip failure! expected: {}", &original_json);
+                        println!("<<< roundtrip failure! found: {}", &roundtrip_json);
+                    }
+ 
+                }
+                Err(error) => {
+                    println!("<<< parse failure! file: {} error: {}", &path_str, &error);
+                    // FIXME actually fail here.
+                    // TODO wrap in custom error, attaching failing file
+                    //assert!(false)
+                }
+            };
+
+            //let geojson_string = geojson_result.unwrap().to_string();
+
+            //let original_json: serde_json::Value = serde_json::from_str(&file_contents).unwrap();
+            //let roundtrip_json: serde_json::Value = serde_json::from_str(&geojson_string).unwrap();
+
+            //if (original_json == roundtrip_json) {
+                //println!(">> roundtrip success! file: {}", &path_str);
+            //} else {
+                //println!(">> roundtrip failure! file: {}", &path_str);
+            //}
+            ////assert_eq!(original_json, roundtrip_json);
 		}
     }
 }
