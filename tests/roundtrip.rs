@@ -46,7 +46,6 @@ mod tests {
                         println!("<<< roundtrip failure! expected: {}", &original_json);
                         println!("<<< roundtrip failure! found: {}", &roundtrip_json);
                     }
- 
                 }
                 Err(error) => {
                     println!("<<< parse failure! file: {} error: {}", &path_str, &error);

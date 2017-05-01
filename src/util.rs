@@ -47,6 +47,35 @@ pub fn get_bbox(object: &JsonObject) -> Result<Option<Bbox>, Error> {
 }
 
 /// Used by FeatureCollection, Feature, Geometry
+/// TODO use ForeignMembers type, not serde_json::Map
+pub fn get_foreign_members(object: &JsonObject) -> Result<Option<::serde_json::Map<String, JsonValue>>, Error> {
+    let reserved_keys = [ "bbox".to_string(), 
+                          "coordinates".to_string(), 
+                          "crs".to_string(), 
+                          "features".to_string(),
+                          "geometries".to_string(),
+                          "geometry".to_string(), 
+                          "id".to_string(),
+                          "properties".to_string(), 
+                          "type".to_string() ];
+
+    let mut foreign_members = ::serde_json::Map::new();
+    for (key, value) in object {
+        if !reserved_keys.contains(key) {
+            foreign_members.insert(key.to_owned(), value.to_owned());
+        }
+    }
+
+    // TODO instead of optional, always return collection. It just might be empty. That way we
+    // don't have to think about multiple null cases (e.g. empty colletion vs None)
+    if foreign_members.len() == 0 {
+        return Ok(None);
+    } else {
+        return Ok(Some(foreign_members));
+    }
+}
+
+/// Used by FeatureCollection, Feature, Geometry
 pub fn get_crs(object: &JsonObject) -> Result<Option<Crs>, Error> {
     let crs_json = match object.get("crs") {
         Some(b) => b,

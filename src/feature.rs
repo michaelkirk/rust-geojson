@@ -105,6 +105,7 @@ mod tests {
         ::Feature {
             geometry: Some(Geometry {
                 value: Value::Point(vec![1.1, 2.1]),
+                foreign_members: None,
                 crs: None,
                 bbox: None,
             }),
