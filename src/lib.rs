@@ -418,6 +418,12 @@ pub use crate::errors::{Error, Result};
 
 #[cfg(feature = "geo-types")]
 mod conversion;
+pub mod de;
+pub use de::deserialize_geometry;
+
+mod feature_reader;
+
+pub use feature_reader::FeatureReader;
 
 #[cfg(feature = "geo-types")]
 pub use conversion::quick_collection;

@@ -3,8 +3,7 @@ use crate::geo_types::{self, CoordFloat};
 use crate::geometry;
 
 use crate::{
-    quick_collection, Feature, FeatureCollection, GeoJson, Geometry, LineStringType, PointType,
-    PolygonType,
+    quick_collection, Feature, FeatureCollection, GeoJson, LineStringType, PointType, PolygonType,
 };
 use crate::{Error, Result};
 use std::convert::{TryFrom, TryInto};
@@ -180,17 +179,33 @@ where
     }
 }
 
-#[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
-impl<T> TryFrom<Geometry> for geo_types::Geometry<T>
-where
-    T: CoordFloat,
-{
-    type Error = Error;
+macro_rules! impl_try_from_geom_value {
+    ($($kind:ident),*) => {
+        $(
+            #[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
+            impl<T> TryFrom<$crate::Geometry> for geo_types::$kind<T>
+            where
+                T: CoordFloat,
+            {
+                type Error = Error;
 
-    fn try_from(val: Geometry) -> Result<geo_types::Geometry<T>> {
-        val.value.try_into()
+                fn try_from(geometry: crate::Geometry) -> Result<Self> {
+                    Self::try_from(geometry.value)
+                }
+            }
+        )*
     }
 }
+impl_try_from_geom_value![
+    Point,
+    LineString,
+    Polygon,
+    MultiPoint,
+    MultiLineString,
+    MultiPolygon,
+    Geometry,
+    GeometryCollection
+];
 
 #[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
 impl<T> TryFrom<Feature> for geo_types::Geometry<T>
