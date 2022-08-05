@@ -2,14 +2,8 @@
 
 ## UNRELEASED
 
-* Added FeatureReader to deserialize Features into your own custom structs using serde.
-  * <https://github.com/georust/geojson/pull/199>
 * Added IntoIter implementation for FeatureCollection.
   * <https://github.com/georust/geojson/pull/196>
-* Add `geojson::Result<T>`
-  * <https://github.com/georust/geojson/pull/198>
-* BREAKING: Change the Result type of FeatureIterator from io::Result to crate::Result
-  * <https://github.com/georust/geojson/pull/199>
 
 ## 0.23.0
 
