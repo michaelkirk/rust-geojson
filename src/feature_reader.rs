@@ -1,4 +1,4 @@
-use crate::deserialize::deserialize_feature_collection;
+use crate::de::deserialize_feature_collection;
 use crate::{Feature, Result};
 
 use serde::de::DeserializeOwned;
@@ -164,7 +164,7 @@ impl<'r, R: Read> FeatureReader<R> {
     ///
     /// let io_reader = std::io::BufReader::new(feature_collection_string);
     ///
-    /// use geojson::deserialize::deserialize_geometry;
+    /// use geojson::de::deserialize_geometry;
     /// use geojson::FeatureReader;
     /// use serde::Deserialize;
     ///
