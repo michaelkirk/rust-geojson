@@ -1,13 +1,11 @@
+use crate::{JsonValue, Feature, FeatureReader, Result};
+
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Formatter;
 use std::io::Read;
 use std::marker::PhantomData;
 
-use crate::Result;
-
 use serde::de::{Deserialize, Deserializer, Error, IntoDeserializer};
-
-use crate::JsonValue;
 
 pub struct FeatureCollectionVisitor;
 
@@ -148,11 +146,18 @@ where
     }
 }
 
-pub(crate) fn deserialize_collection_features_from_reader<'de, D>(
+pub fn deserialize_features_from_feature_collection<'de>(
     feature_collection_reader: impl Read,
-) -> Result<impl Iterator<Item = Result<D>>>
+) -> impl Iterator<Item = Result<Feature>>
+{
+    FeatureReader::from_reader(feature_collection_reader).features()
+}
+
+pub fn deserialize_feature_collection<'de, T>(
+    feature_collection_reader: impl Read,
+) -> Result<impl Iterator<Item = Result<T>>>
 where
-    D: Deserialize<'de>,
+    T: Deserialize<'de>,
 {
     let mut deserializer = serde_json::Deserializer::from_reader(feature_collection_reader);
 
@@ -165,10 +170,19 @@ where
     Ok(objects.into_iter().map(|feature_value| {
         let deserializer = feature_value.into_deserializer();
         let visitor = FeatureVisitor::new();
-        let record: D = deserializer.deserialize_map(visitor)?;
+        let record: T = deserializer.deserialize_map(visitor)?;
 
         Ok(record)
     }))
+}
+
+pub fn deserialize_feature_collection_to_vec<'de, T>(
+    feature_collection_reader: impl Read,
+) -> Result<Vec<T>>
+where
+    T: Deserialize<'de>,
+{
+    deserialize_feature_collection(feature_collection_reader)?.collect()
 }
 
 pub fn deserialize_geometry<'de, D, G>(deserializer: D) -> std::result::Result<G, D::Error>
@@ -188,13 +202,8 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use serde_json::json;
-
-    #[cfg(feature = "geo-types")]
-    mod geo_types_tests {
-        use super::*;
-
-        fn feature_collection_string() -> String {
-            json!({
+    fn feature_collection_string() -> String {
+        json!({
                 "type": "FeatureCollection",
                 "features": [
                     {
@@ -222,7 +231,26 @@ mod tests {
                 ]
             })
             .to_string()
-        }
+    }
+
+    #[test]
+    fn test_deserialize_feature_collection() {
+        use crate::Feature;
+
+        let feature_collection_string = feature_collection_string();
+        let bytes_reader = feature_collection_string.as_bytes();
+
+        // let records: Vec<Feature> = deserialize_feature_collection(bytes_reader)
+        let records: Vec<Feature> = deserialize_features_from_feature_collection(bytes_reader)
+            .map(|feature_result: Result<Feature>| {
+                feature_result.unwrap()
+            })
+            .collect();
+    }
+
+    #[cfg(feature = "geo-types")]
+    mod geo_types_tests {
+        use super::*;
 
         #[test]
         fn geometry_field() {
@@ -238,7 +266,7 @@ mod tests {
             let feature_collection_string = feature_collection_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
-            let records: Vec<MyStruct> = deserialize_collection_features_from_reader(bytes_reader)
+            let records: Vec<MyStruct> = deserialize_feature_collection(bytes_reader)
                 .expect("a valid feature collection")
                 .collect::<Result<Vec<_>>>()
                 .expect("valid features");
@@ -274,7 +302,7 @@ mod tests {
             let feature_collection_string = feature_collection_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
-            let records: Vec<MyStruct> = deserialize_collection_features_from_reader(bytes_reader)
+            let records: Vec<MyStruct> = deserialize_feature_collection(bytes_reader)
                 .expect("a valid feature collection")
                 .collect::<Result<Vec<_>>>()
                 .expect("valid features");
@@ -304,10 +332,9 @@ mod tests {
             let feature_collection_string = feature_collection_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
-            let records: Vec<Result<MyStruct>> =
-                deserialize_collection_features_from_reader(bytes_reader)
-                    .expect("a valid feature collection")
-                    .collect();
+            let records: Vec<Result<MyStruct>> = deserialize_feature_collection(bytes_reader)
+                .expect("a valid feature collection")
+                .collect();
             assert_eq!(records.len(), 2);
             assert!(records[0].is_err());
             assert!(records[1].is_err());

@@ -1,4 +1,4 @@
-use crate::deserialize::deserialize_collection_features_from_reader;
+use crate::deserialize::deserialize_feature_collection;
 use crate::{Feature, Result};
 
 use serde::de::DeserializeOwned;
@@ -190,7 +190,7 @@ impl<'r, R: Read> FeatureReader<R> {
     /// }
     /// ```
     pub fn deserialize<D: DeserializeOwned>(self) -> Result<impl Iterator<Item = Result<D>>> {
-        Ok(deserialize_collection_features_from_reader(self.reader)?)
+        Ok(deserialize_feature_collection(self.reader)?)
     }
 }
 
