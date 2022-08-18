@@ -330,6 +330,7 @@ mod tests {
         #[test]
         fn wrong_geometry_variant_field() {
             // Some example object, that we want to parse the geojson into.
+            #[allow(unused)]
             #[derive(Debug, Deserialize)]
             struct MyStruct {
                 #[serde(deserialize_with = "deserialize_geometry")]

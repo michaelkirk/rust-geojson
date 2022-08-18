@@ -193,6 +193,21 @@ macro_rules! impl_try_from_geom_value {
                     Self::try_from(geometry.value)
                 }
             }
+
+            #[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
+            impl<T> TryFrom<$crate::Feature> for geo_types::$kind<T>
+            where
+                T: CoordFloat,
+            {
+                type Error = Error;
+
+                fn try_from(val: Feature) -> Result<Self> {
+                    match val.geometry {
+                        None => Err(Error::FeatureHasNoGeometry(val)),
+                        Some(geom) => geom.try_into(),
+                    }
+                }
+            }
         )*
     }
 }
@@ -206,21 +221,6 @@ impl_try_from_geom_value![
     Geometry,
     GeometryCollection
 ];
-
-#[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
-impl<T> TryFrom<Feature> for geo_types::Geometry<T>
-where
-    T: CoordFloat,
-{
-    type Error = Error;
-
-    fn try_from(val: Feature) -> Result<geo_types::Geometry<T>> {
-        match val.geometry {
-            None => Err(Error::FeatureHasNoGeometry(val)),
-            Some(geom) => geom.try_into(),
-        }
-    }
-}
 
 #[cfg_attr(docsrs, doc(cfg(feature = "geo-types")))]
 impl<T> TryFrom<FeatureCollection> for geo_types::Geometry<T>
