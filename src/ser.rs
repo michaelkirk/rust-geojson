@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{JsonObject, JsonValue};
     use serde_json::json;
     use std::str::FromStr;
 
     #[cfg(feature = "geo-types")]
     mod geo_types_tests {
         use super::*;
-        use crate::JsonValue;
 
         fn feature_collection_string() -> String {
             json!({
@@ -73,6 +73,7 @@ mod tests {
 
             assert_eq!(output_string, expected_string);
         }
+
         #[test]
         fn feature_collection() {
             // Some example object, that we want to parse the geojson into.
@@ -82,6 +83,19 @@ mod tests {
                 geometry: geo_types::Point<f64>,
                 name: String,
                 age: u64,
+            }
+
+            impl SerializableAsFeature<crate::Geometry, crate::JsonObject> for MyStruct {
+                fn geometry(&self) -> crate::Geometry {
+                    (&self.geometry).into()
+                }
+
+                fn properties(&self) -> crate::JsonObject {
+                    let mut map = JsonObject::new();
+                    map.insert("name".to_string(), self.name.clone().into());
+                    map.insert("age".to_string(), self.age.into());
+                    map
+                }
             }
 
             let my_structs = vec![
@@ -131,9 +145,11 @@ where
     Ok(string)
 }
 
-pub fn to_feature_collection_string<T>(values: &[T]) -> Result<String>
+pub fn to_feature_collection_string<T, G, P>(values: &[T]) -> Result<String>
 where
-    T: Serialize,
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
 {
     let vec = to_feature_collection_vec(values)?;
     let string = unsafe {
@@ -160,17 +176,19 @@ where
 }
 
 #[inline]
-pub fn to_feature_collection_vec<T>(values: &[T]) -> Result<Vec<u8>>
+pub fn to_feature_collection_vec<T, G, P>(values: &[T]) -> Result<Vec<u8>>
 where
-    T: Serialize,
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
 {
     let mut writer = Vec::with_capacity(128);
     to_feature_collection_writer(&mut writer, values)?;
     Ok(writer)
 }
 
-use serde_json::{Map, Value};
 use std::io;
+use std::marker::PhantomData;
 
 /// Serialize the given data structure as JSON into the IO stream.
 ///
@@ -212,16 +230,47 @@ where
     Ok(())
 }
 
-struct Features<'a, T>
+pub trait SerializableAsFeature<G, P>
 where
-    T: Serialize,
+    G: Serialize,
+    P: Serialize,
 {
-    features: &'a [T],
+    fn geometry(&self) -> G;
+    fn properties(&self) -> P;
 }
 
-impl<'a, T> serde::Serialize for Features<'a, T>
+struct Features<'a, T, G, P>
 where
-    T: Serialize,
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
+{
+    features: &'a [T],
+    geometry: PhantomData<G>,
+    properties: PhantomData<P>,
+}
+impl<'a, T, G, P> Features<'a, T, G, P>
+where
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
+{
+    fn new(features: &'a [T]) -> Self {
+        Self {
+            features,
+            geometry: PhantomData,
+            properties: PhantomData,
+        }
+    }
+}
+
+struct FeatureSerializer;
+
+impl<'a, T, G, P> serde::Serialize for Features<'a, T, G, P>
+where
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -230,25 +279,76 @@ where
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(None)?;
         for feature in self.features.iter() {
-            seq.serialize_element(feature)?;
+            seq.serialize_element(&FeatureWrapper::new(feature))?;
         }
         seq.end()
     }
 }
 
+struct FeatureWrapper<'t, T, G, P> {
+    feature: &'t T,
+    geometry: PhantomData<G>,
+    properties: PhantomData<P>,
+}
+
+impl<'t, T, G, P> FeatureWrapper<'t, T, G, P> {
+    fn new(feature: &'t T) -> Self {
+        Self {
+            feature,
+            geometry: PhantomData,
+            properties: PhantomData,
+        }
+    }
+}
+
+impl<T, G, P> FeatureWrapper<'_, T, G, P>
+where
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
+{
+    fn geometry(&self) -> G {
+        self.feature.geometry()
+    }
+
+    fn properties(&self) -> P {
+        self.feature.properties()
+    }
+}
+
+impl<T, G, P> Serialize for FeatureWrapper<'_, T, G, P>
+where
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("type", "Feature")?;
+        map.serialize_entry("geometry", &self.geometry())?;
+        map.serialize_entry("properties", &self.properties())?;
+        map.end()
+    }
+}
+
 #[inline]
-pub fn to_feature_collection_writer<W, T>(writer: W, values: &[T]) -> Result<()>
+pub fn to_feature_collection_writer<W, T, G, P>(writer: W, values: &[T]) -> Result<()>
 where
     W: io::Write,
-    T: Serialize,
+    T: SerializableAsFeature<G, P>,
+    G: Serialize,
+    P: Serialize,
 {
-    use serde::ser::{SerializeMap, Serializer};
+    use serde::ser::SerializeMap;
 
     let mut ser = serde_json::Serializer::new(writer);
     let mut map = ser.serialize_map(Some(2))?;
     map.serialize_entry("type", "FeatureCollection")?;
-
-    let features = Features { features: values };
+    let features = Features::new(values);
     map.serialize_entry("features", &features)?;
     map.end()?;
     Ok(())
