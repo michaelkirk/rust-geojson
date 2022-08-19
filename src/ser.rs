@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
     use serde_json::json;
 
     #[cfg(feature = "geo-types")]
@@ -45,7 +44,7 @@ mod tests {
             #[derive(Serialize)]
             struct MyStruct {
                 #[serde(serialize_with = "serialize_geometry")]
-                geometry: geo_types::Geometry<f64>,
+                geometry: geo_types::Point<f64>,
                 name: String,
                 age: u64,
             }
@@ -158,9 +157,14 @@ where
     Ok(())
 }
 
-fn serialize_geometry<S: serde::Serializer>(
-    geometry: &geo_types::Geometry<f64>,
-    ser: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    crate::Geometry::from(geometry).serialize(ser)
+fn serialize_geometry<IG, S>(geometry: IG, ser: S) -> std::result::Result<S::Ok, S::Error>
+where
+    IG: std::convert::TryInto<crate::Geometry>,
+    S: serde::Serializer,
+{
+    use serde::ser::Error;
+    geometry
+        .try_into()
+        .map_err(|_e| Error::custom(format!("failed to convert geometry to geojson")))
+        .and_then(|geojson_geometry| geojson_geometry.serialize(ser))
 }
