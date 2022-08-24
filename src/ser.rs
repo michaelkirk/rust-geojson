@@ -1,130 +1,3 @@
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{JsonObject, JsonValue};
-    use serde_json::json;
-    use std::str::FromStr;
-
-    #[cfg(feature = "geo-types")]
-    mod geo_types_tests {
-        use super::*;
-
-        fn feature_collection_string() -> String {
-            json!({
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                      "type": "Feature",
-                      "geometry": {
-                        "type": "Point",
-                        "coordinates": [125.6, 10.1]
-                      },
-                      "properties": {
-                        "name": "Dinagat Islands",
-                        "age": 123
-                      }
-                    },
-                    {
-                      "type": "Feature",
-                      "geometry": {
-                        "type": "Point",
-                        "coordinates": [2.3, 4.5]
-                      },
-                      "properties": {
-                        "name": "Neverland",
-                        "age": 456
-                      }
-                    }
-                ]
-            })
-            .to_string()
-        }
-
-        #[test]
-        fn geometry_field() {
-            // Some example object, that we want to parse the geojson into.
-            #[derive(Serialize)]
-            struct MyStruct {
-                #[serde(serialize_with = "serialize_geometry")]
-                geometry: geo_types::Point<f64>,
-                name: String,
-                age: u64,
-            }
-
-            let my_struct = MyStruct {
-                geometry: geo_types::point!(x: 125.6, y: 10.1).into(),
-                name: "Dinagat Islands".to_string(),
-                age: 123,
-            };
-
-            let expected_output = serde_json::json!({
-              "type": "Feature",
-              "geometry": {
-                "type": "Point",
-                "coordinates": [125.6, 10.1]
-              },
-              "properties": {
-                "name": "Dinagat Islands",
-                "age": 123
-              }
-            });
-
-            // Order might vary, so re-parse to do a semantic comparison of the content.
-            let output_string = to_feature_string(&my_struct).expect("valid serialization");
-            let actual_output = JsonValue::from_str(&output_string).unwrap();
-
-            assert_eq!(actual_output, expected_output);
-        }
-
-        #[test]
-        fn feature_collection() {
-            // Some example object, that we want to parse the geojson into.
-            #[derive(Serialize)]
-            struct MyStruct {
-                #[serde(serialize_with = "serialize_geometry")]
-                geometry: geo_types::Point<f64>,
-                name: String,
-                age: u64,
-            }
-
-            impl SerializableAsFeature<crate::Geometry, crate::JsonObject> for MyStruct {
-                fn geometry(&self) -> crate::Geometry {
-                    (&self.geometry).into()
-                }
-
-                fn properties(&self) -> crate::JsonObject {
-                    let mut map = JsonObject::new();
-                    map.insert("name".to_string(), self.name.clone().into());
-                    map.insert("age".to_string(), self.age.into());
-                    map
-                }
-            }
-
-            let my_structs = vec![
-                MyStruct {
-                    geometry: geo_types::point!(x: 125.6, y: 10.1).into(),
-                    name: "Dinagat Islands".to_string(),
-                    age: 123,
-                },
-                MyStruct {
-                    geometry: geo_types::point!(x: 2.3, y: 4.5).into(),
-                    name: "Neverland".to_string(),
-                    age: 456,
-                },
-            ];
-
-            let output_string =
-                to_feature_collection_string(&my_structs).expect("valid serialization");
-
-            // Order might vary, so re-parse to do a semantic comparison of the content.
-            let expected_output = JsonValue::from_str(&feature_collection_string()).unwrap();
-            let actual_output = JsonValue::from_str(&output_string).unwrap();
-
-            assert_eq!(actual_output, expected_output);
-        }
-    }
-}
-
 use crate::{JsonObject, Result};
 use serde::{Serialize, Serializer};
 
@@ -252,6 +125,8 @@ impl<'t, T> FeatureWrapper<'t, T> {
     }
 }
 
+use serde::ser::Error;
+
 impl<T> Serialize for FeatureWrapper<'_, T>
 where
     T: Serialize,
@@ -260,16 +135,18 @@ where
     where
         S: Serializer,
     {
-        use serde::ser::SerializeMap;
-        // PERF: this is like a double serde-serde just to juggle some fields around.
-        // How can we skip this?
         let mut json_object: JsonObject = {
-            let bytes = serde_json::to_vec(self.feature).expect("TODO");
-            serde_json::from_slice(&bytes).expect("TODO")
+            // PERF: this feels like an extra round-trip just to juggle some fields around.
+            // How can we skip this?
+            //let bytes = serde_json::to_vec(self.feature).map_err(|e| S::Error::from(Box::new(e)))?;
+            let bytes = serde_json::to_vec(self.feature)
+                .map_err(|e| S::Error::custom(format!("unable to serialize to json: {}", e)))?;
+            serde_json::from_slice(&bytes)
+                .map_err(|e| S::Error::custom(format!("unable to roundtrip from json: {}", e)))?
         };
+        let geometry = json_object.remove("geometry");
 
-        let geometry = json_object.remove("geometry").unwrap();
-
+        use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(3))?;
         map.serialize_entry("type", "Feature")?;
         map.serialize_entry("geometry", &geometry)?;
@@ -299,9 +176,219 @@ where
     IG: std::convert::TryInto<crate::Geometry>,
     S: serde::Serializer,
 {
-    use serde::ser::Error;
     geometry
         .try_into()
         .map_err(|_e| Error::custom(format!("failed to convert geometry to geojson")))
         .and_then(|geojson_geometry| geojson_geometry.serialize(ser))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{JsonObject, JsonValue};
+    use serde_json::json;
+    use std::str::FromStr;
+
+    #[test]
+    fn happy_path() {
+        #[derive(Serialize)]
+        struct MyStruct {
+            geometry: crate::Geometry,
+            name: String,
+        }
+
+        let my_feature = {
+            let geometry = crate::Geometry::new(crate::Value::Point(vec![0.0, 1.0]));
+            let name = "burbs".to_string();
+            MyStruct { geometry, name }
+        };
+
+        let expected_output_json = json!({
+            "type": "Feature",
+            "geometry": {
+                "coordinates":[0.0,1.0],
+                "type":"Point"
+            },
+            "properties": {
+                "name": "burbs"
+            }
+        });
+
+        let actual_output = to_feature_string(&my_feature).unwrap();
+        let actual_output_json = JsonValue::from_str(&actual_output).unwrap();
+        assert_eq!(actual_output_json, expected_output_json);
+    }
+
+    mod optional_geometry {
+        use super::*;
+        #[derive(Serialize)]
+        struct MyStruct {
+            geometry: Option<crate::Geometry>,
+            name: String,
+        }
+
+        #[test]
+        fn with_some_geom() {
+            let my_feature = {
+                let geometry = Some(crate::Geometry::new(crate::Value::Point(vec![0.0, 1.0])));
+                let name = "burbs".to_string();
+                MyStruct { geometry, name }
+            };
+
+            let expected_output_json = json!({
+                "type": "Feature",
+                "geometry": {
+                    "coordinates":[0.0,1.0],
+                    "type":"Point"
+                },
+                "properties": {
+                    "name": "burbs"
+                }
+            });
+
+            let actual_output = to_feature_string(&my_feature).unwrap();
+            let actual_output_json = JsonValue::from_str(&actual_output).unwrap();
+            assert_eq!(actual_output_json, expected_output_json);
+        }
+
+        #[test]
+        fn with_no_geom() {
+            let my_feature = {
+                let geometry = None;
+                let name = "burbs".to_string();
+                MyStruct { geometry, name }
+            };
+
+            let expected_output_json = json!({
+                "type": "Feature",
+                "geometry": null,
+                "properties": {
+                    "name": "burbs"
+                }
+            });
+
+            let actual_output = to_feature_string(&my_feature).unwrap();
+            let actual_output_json = JsonValue::from_str(&actual_output).unwrap();
+            assert_eq!(actual_output_json, expected_output_json);
+        }
+    }
+
+    #[cfg(feature = "geo-types")]
+    mod geo_types_tests {
+        use super::*;
+
+        fn feature_collection_string() -> String {
+            json!({
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [125.6, 10.1]
+                      },
+                      "properties": {
+                        "name": "Dinagat Islands",
+                        "age": 123
+                      }
+                    },
+                    {
+                      "type": "Feature",
+                      "geometry": {
+                        "type": "Point",
+                        "coordinates": [2.3, 4.5]
+                      },
+                      "properties": {
+                        "name": "Neverland",
+                        "age": 456
+                      }
+                    }
+                ]
+            })
+            .to_string()
+        }
+
+        #[test]
+        fn geometry_field() {
+            // Some example object, that we want to parse the geojson into.
+            #[derive(Serialize)]
+            struct MyStruct {
+                #[serde(serialize_with = "serialize_geometry")]
+                geometry: geo_types::Point<f64>,
+                name: String,
+                age: u64,
+            }
+
+            let my_struct = MyStruct {
+                geometry: geo_types::point!(x: 125.6, y: 10.1).into(),
+                name: "Dinagat Islands".to_string(),
+                age: 123,
+            };
+
+            let expected_output = serde_json::json!({
+              "type": "Feature",
+              "geometry": {
+                "type": "Point",
+                "coordinates": [125.6, 10.1]
+              },
+              "properties": {
+                "name": "Dinagat Islands",
+                "age": 123
+              }
+            });
+
+            // Order might vary, so re-parse to do a semantic comparison of the content.
+            let output_string = to_feature_string(&my_struct).expect("valid serialization");
+            let actual_output = JsonValue::from_str(&output_string).unwrap();
+
+            assert_eq!(actual_output, expected_output);
+        }
+
+        #[test]
+        fn feature_collection() {
+            // Some example object, that we want to parse the geojson into.
+            #[derive(Serialize)]
+            struct MyStruct {
+                #[serde(serialize_with = "serialize_geometry")]
+                geometry: geo_types::Point<f64>,
+                name: String,
+                age: u64,
+            }
+
+            impl SerializableAsFeature<crate::Geometry, crate::JsonObject> for MyStruct {
+                fn geometry(&self) -> crate::Geometry {
+                    (&self.geometry).into()
+                }
+
+                fn properties(&self) -> crate::JsonObject {
+                    let mut map = JsonObject::new();
+                    map.insert("name".to_string(), self.name.clone().into());
+                    map.insert("age".to_string(), self.age.into());
+                    map
+                }
+            }
+
+            let my_structs = vec![
+                MyStruct {
+                    geometry: geo_types::point!(x: 125.6, y: 10.1),
+                    name: "Dinagat Islands".to_string(),
+                    age: 123,
+                },
+                MyStruct {
+                    geometry: geo_types::point!(x: 2.3, y: 4.5),
+                    name: "Neverland".to_string(),
+                    age: 456,
+                },
+            ];
+
+            let output_string =
+                to_feature_collection_string(&my_structs).expect("valid serialization");
+
+            // Order might vary, so re-parse to do a semantic comparison of the content.
+            let expected_output = JsonValue::from_str(&feature_collection_string()).unwrap();
+            let actual_output = JsonValue::from_str(&output_string).unwrap();
+
+            assert_eq!(actual_output, expected_output);
+        }
+    }
 }
