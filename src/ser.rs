@@ -365,8 +365,44 @@ mod tests {
         }
 
         #[test]
+        fn geometry_field_without_helper() {
+            #[derive(Serialize)]
+            struct MyStruct {
+                // If we forget the "serialize_with" helper, bad things happen.
+                // This test documents that:
+                //
+                // #[serde(serialize_with = "serialize_geometry")]
+                geometry: geo_types::Point<f64>,
+                name: String,
+                age: u64,
+            }
+
+            let my_struct = MyStruct {
+                geometry: geo_types::point!(x: 125.6, y: 10.1),
+                name: "Dinagat Islands".to_string(),
+                age: 123,
+            };
+
+            let expected_invalid_output = serde_json::json!({
+              "type": "Feature",
+              // This isn't a valid geojson-Geometry. This behavior probably isn't desirable, but this
+              // test documents the current behavior of what happens if the users forgets "geometry"
+              "geometry": { "x": 125.6, "y": 10.1 },
+              "properties": {
+                "name": "Dinagat Islands",
+                "age": 123
+              }
+            });
+
+            // Order might vary, so re-parse to do a semantic comparison of the content.
+            let output_string = to_feature_string(&my_struct).expect("valid serialization");
+            let actual_output = JsonValue::from_str(&output_string).unwrap();
+
+            assert_eq!(actual_output, expected_invalid_output);
+        }
+
+        #[test]
         fn geometry_field() {
-            // Some example object, that we want to parse the geojson into.
             #[derive(Serialize)]
             struct MyStruct {
                 #[serde(serialize_with = "serialize_geometry")]
@@ -376,7 +412,7 @@ mod tests {
             }
 
             let my_struct = MyStruct {
-                geometry: geo_types::point!(x: 125.6, y: 10.1).into(),
+                geometry: geo_types::point!(x: 125.6, y: 10.1),
                 name: "Dinagat Islands".to_string(),
                 age: 123,
             };
@@ -402,7 +438,6 @@ mod tests {
 
         #[test]
         fn feature_collection() {
-            // Some example object, that we want to parse the geojson into.
             #[derive(Serialize)]
             struct MyStruct {
                 #[serde(serialize_with = "serialize_geometry")]
