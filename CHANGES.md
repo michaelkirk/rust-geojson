@@ -4,11 +4,36 @@
 
 * Fix: FeatureIterator errors when reading "features" field before "type" field.
   * <https://github.com/georust/geojson/pull/200>
-* Added FeatureReader to deserialize Features into your own custom structs using serde.
-  * <https://github.com/georust/geojson/pull/199>
+* Added serde integration to help convert your custom structs to and from GeoJSON.
+  * PR: <https://github.com/georust/geojson/pull/199>
+  * Notes:
+    geojson::ser has helpers to convert your custom struct to GeoJSON. Note that if you're using an external geometry type, like geo_types, you'll need to use a deserialize_with helper to get proper results:
+    ```
+    #[derive(Serialize)]
+    struct MyStruct {
+        #[serde(serialize_with = "serialize_geometry")]
+        geometry: geo_types::Point<f64>,
+        name: String,
+        age: u64,
+    }
+    let some_geojson = geojson::ser::to_feature_string(my_struct).unwrap();
+    ```
+
+    geojson::de has helpers to convert GeoJSON to your custom struct. Note that if you're using an external geometry type, like geo_types, you'll need to use a deserialize_with helper to get proper results:
+    ```
+    #[derive(Serialize)]
+    struct MyStruct {
+        #[serde(deserialize_with = "deserialize_geometry")]
+        geometry: geo_types::Point<f64>,
+        name: String,
+        age: u64,
+    }
+    let my_struct = geojson::de::deserialize_single_feature_str(some_geojson).unwrap();
+    ```
+
 * Added IntoIter implementation for FeatureCollection.
   * <https://github.com/georust/geojson/pull/196>
-* Add `geojson::Result<T>`
+* Added `geojson::Result<T>`.
   * <https://github.com/georust/geojson/pull/198>
 * BREAKING: Change the Result type of FeatureIterator from io::Result to crate::Result
   * <https://github.com/georust/geojson/pull/199>

@@ -152,6 +152,18 @@ pub fn deserialize_features_from_feature_collection<'de>(
     FeatureReader::from_reader(feature_collection_reader).features()
 }
 
+pub fn deserialize_single_feature<'de, T>(
+    feature_reader: impl Read,
+) -> Result<T>
+    where
+    T: Deserialize<'de>,
+{
+    let feature_value: JsonValue = serde_json::from_reader(feature_reader)?;
+    let deserializer = feature_value.into_deserializer();
+    let visitor = FeatureVisitor::new();
+    Ok(deserializer.deserialize_map(visitor)?)
+}
+
 pub fn deserialize_feature_collection<'de, T>(
     feature_collection_reader: impl Read,
 ) -> Result<impl Iterator<Item = Result<T>>>
@@ -160,7 +172,7 @@ where
 {
     let mut deserializer = serde_json::Deserializer::from_reader(feature_collection_reader);
 
-    // TODO: rather than deserializing the entirety of the `features:` array into memory here, it'd
+    // PERF: rather than deserializing the entirety of the `features:` array into memory here, it'd
     // be nice to stream the features. However, I ran into difficulty while trying to return any
     // borrowed reference from the visitor methods (e.g. MapAccess)
     let visitor = FeatureCollectionVisitor::new();
