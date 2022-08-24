@@ -33,21 +33,21 @@ impl<'de> serde::de::Visitor<'de> for FeatureCollectionVisitor {
                 if value == JsonValue::String("FeatureCollection".to_string()) {
                     has_feature_collection_type = true;
                 } else {
-                    return Err(A::Error::custom("invalid type for feature collection"));
+                    return Err(Error::custom("invalid type for feature collection"));
                 }
             } else if key == "features" {
                 if let JsonValue::Array(value) = value {
                     if features.is_some() {
-                        return Err(A::Error::custom(
+                        return Err(Error::custom(
                             "Encountered more than one list of `features`",
                         ));
                     }
                     features = Some(value);
                 } else {
-                    return Err(A::Error::custom("`features` had unexpected value"));
+                    return Err(Error::custom("`features` had unexpected value"));
                 }
             } else {
-                return Err(A::Error::custom(
+                return Err(Error::custom(
                     "foreign members are not handled by FeatureCollection deserializer",
                 ));
             }
@@ -57,10 +57,10 @@ impl<'de> serde::de::Visitor<'de> for FeatureCollectionVisitor {
             if has_feature_collection_type {
                 Ok(features)
             } else {
-                Err(A::Error::custom("No `type` field was found"))
+                Err(Error::custom("No `type` field was found"))
             }
         } else {
-            Err(A::Error::custom("No `features` field was found"))
+            Err(Error::custom("No `features` field was found"))
         }
     }
 }
@@ -93,14 +93,14 @@ where
     {
         let mut has_feature_type = false;
         use std::collections::HashMap;
-        let mut hash_map: HashMap<String, crate::JsonValue> = HashMap::new();
+        let mut hash_map: HashMap<String, JsonValue> = HashMap::new();
 
         while let Some((key, value)) = map_access.next_entry::<String, JsonValue>()? {
             if key == "type" {
                 if value.as_str() == Some("Feature") {
                     has_feature_type = true;
                 } else {
-                    return Err(A::Error::custom(
+                    return Err(Error::custom(
                         "GeoJSON Feature had a `type` other than \"Feature\"",
                     ));
                 }
@@ -108,9 +108,7 @@ where
                 if let JsonValue::Object(_) = value {
                     hash_map.insert("geometry".to_string(), value);
                 } else {
-                    return Err(A::Error::custom(
-                        "GeoJSON Feature had a unexpected geometry",
-                    ));
+                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
                 }
             } else if key == "properties" {
                 if let JsonValue::Object(properties) = value {
@@ -119,12 +117,10 @@ where
                         hash_map.insert(prop_key, prop_value);
                     }
                 } else {
-                    return Err(A::Error::custom(
-                        "GeoJSON Feature had a unexpected geometry",
-                    ));
+                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
                 }
             } else {
-                return Err(A::Error::custom(
+                return Err(Error::custom(
                     "foreign members are not handled by FeatureCollection deserializer",
                 ));
             }
@@ -135,11 +131,11 @@ where
             // has the fields needed by a child visitor - perhaps using serde::de::value::MapAccessDeserializer?
             // use serde::de::value::MapAccessDeserializer;
             let d2 = hash_map.into_deserializer();
-            let result = serde::Deserialize::deserialize(d2)
-                .map_err(|e| A::Error::custom(format!("{}", e)))?;
+            let result =
+                Deserialize::deserialize(d2).map_err(|e| Error::custom(format!("{}", e)))?;
             Ok(result)
         } else {
-            return Err(A::Error::custom(
+            return Err(Error::custom(
                 "A GeoJSON Feature must have a `type: \"Feature\"` field, but found none.",
             ));
         }
@@ -152,10 +148,8 @@ pub fn deserialize_features_from_feature_collection<'de>(
     FeatureReader::from_reader(feature_collection_reader).features()
 }
 
-pub fn deserialize_single_feature<'de, T>(
-    feature_reader: impl Read,
-) -> Result<T>
-    where
+pub fn deserialize_single_feature<'de, T>(feature_reader: impl Read) -> Result<T>
+where
     T: Deserialize<'de>,
 {
     let feature_value: JsonValue = serde_json::from_reader(feature_reader)?;
@@ -198,22 +192,26 @@ where
 
 pub fn deserialize_geometry<'de, D, G>(deserializer: D) -> std::result::Result<G, D::Error>
 where
-    D: serde::de::Deserializer<'de>,
+    D: Deserializer<'de>,
     G: TryFrom<crate::Geometry>,
     G::Error: std::fmt::Display,
 {
     let geojson_geometry = crate::Geometry::deserialize(deserializer)?;
-    geojson_geometry.try_into().map_err(|err| {
-        D::Error::custom(format!("unable to convert from geojson Geometry: {}", err))
-    })
+    geojson_geometry
+        .try_into()
+        .map_err(|err| Error::custom(format!("unable to convert from geojson Geometry: {}", err)))
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    use crate::JsonValue;
+
     use serde::Deserialize;
     use serde_json::json;
-    fn feature_collection_string() -> String {
+
+    pub(crate) fn feature_collection() -> JsonValue {
         json!({
             "type": "FeatureCollection",
             "features": [
@@ -241,14 +239,13 @@ mod tests {
                 }
             ]
         })
-        .to_string()
     }
 
     #[test]
     fn test_deserialize_feature_collection() {
         use crate::Feature;
 
-        let feature_collection_string = feature_collection_string();
+        let feature_collection_string = feature_collection().to_string();
         let bytes_reader = feature_collection_string.as_bytes();
 
         let records: Vec<Feature> = deserialize_features_from_feature_collection(bytes_reader)
@@ -275,7 +272,6 @@ mod tests {
 
         #[test]
         fn geometry_field() {
-            // Some example object, that we want to parse the geojson into.
             #[derive(Deserialize)]
             struct MyStruct {
                 #[serde(deserialize_with = "deserialize_geometry")]
@@ -284,7 +280,7 @@ mod tests {
                 age: u64,
             }
 
-            let feature_collection_string = feature_collection_string();
+            let feature_collection_string = feature_collection().to_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
             let records: Vec<MyStruct> = deserialize_feature_collection(bytes_reader)
@@ -311,7 +307,6 @@ mod tests {
 
         #[test]
         fn specific_geometry_variant_field() {
-            // Some example object, that we want to parse the geojson into.
             #[derive(Deserialize)]
             struct MyStruct {
                 #[serde(deserialize_with = "deserialize_geometry")]
@@ -320,7 +315,7 @@ mod tests {
                 age: u64,
             }
 
-            let feature_collection_string = feature_collection_string();
+            let feature_collection_string = feature_collection().to_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
             let records: Vec<MyStruct> = deserialize_feature_collection(bytes_reader)
@@ -341,9 +336,8 @@ mod tests {
 
         #[test]
         fn wrong_geometry_variant_field() {
-            // Some example object, that we want to parse the geojson into.
             #[allow(unused)]
-            #[derive(Debug, Deserialize)]
+            #[derive(Deserialize)]
             struct MyStruct {
                 #[serde(deserialize_with = "deserialize_geometry")]
                 geometry: geo_types::LineString<f64>,
@@ -351,22 +345,84 @@ mod tests {
                 age: u64,
             }
 
-            let feature_collection_string = feature_collection_string();
+            let feature_collection_string = feature_collection().to_string();
             let bytes_reader = feature_collection_string.as_bytes();
 
             let records: Vec<Result<MyStruct>> = deserialize_feature_collection(bytes_reader)
-                .expect("a valid feature collection")
+                .unwrap()
                 .collect();
             assert_eq!(records.len(), 2);
             assert!(records[0].is_err());
             assert!(records[1].is_err());
 
-            let err = records[0].as_ref().unwrap_err();
+            let err = match records[0].as_ref() {
+                Ok(_ok) => panic!("expected Err, but found OK"),
+                Err(e) => e,
+            };
 
             // This will fail if we update our error text, but I wanted to show that the error text
             // is reasonably discernible.
             let expected_err_text = r#"Error while deserializing JSON: unable to convert from geojson Geometry: Encountered a mismatch when converting to a Geo type: `{"coordinates":[125.6,10.1],"type":"Point"}`"#;
             assert_eq!(err.to_string(), expected_err_text);
         }
+    }
+
+    #[test]
+    fn roundtrip() {
+        use crate::ser::serialize_geometry;
+        use serde::Serialize;
+
+        #[derive(Serialize, Deserialize)]
+        struct MyStruct {
+            #[serde(
+                serialize_with = "serialize_geometry",
+                deserialize_with = "deserialize_geometry"
+            )]
+            geometry: geo_types::Point<f64>,
+            name: String,
+            age: u64,
+        }
+
+        let feature_collection_string = feature_collection().to_string();
+        let bytes_reader = feature_collection_string.as_bytes();
+
+        let mut elements = deserialize_feature_collection_to_vec::<MyStruct>(bytes_reader).unwrap();
+        for element in &mut elements {
+            element.age += 1;
+            element.geometry.set_x(element.geometry.x() + 1.0);
+        }
+        let actual_output = crate::ser::to_feature_collection_string(&elements).unwrap();
+
+        use std::str::FromStr;
+        let actual_output_json = JsonValue::from_str(&actual_output).unwrap();
+        let expected_output_json = json!({
+            "type": "FeatureCollection",
+            "features": [
+                {
+                  "type": "Feature",
+                  "geometry": {
+                    "type": "Point",
+                    "coordinates": [126.6, 10.1]
+                  },
+                  "properties": {
+                    "name": "Dinagat Islands",
+                    "age": 124
+                  }
+                },
+                {
+                  "type": "Feature",
+                  "geometry": {
+                    "type": "Point",
+                    "coordinates": [3.3, 4.5]
+                  },
+                  "properties": {
+                    "name": "Neverland",
+                    "age": 457
+                  }
+                }
+            ]
+        });
+
+        assert_eq!(actual_output_json, expected_output_json);
     }
 }

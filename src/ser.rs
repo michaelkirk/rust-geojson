@@ -329,37 +329,7 @@ mod tests {
     #[cfg(feature = "geo-types")]
     mod geo_types_tests {
         use super::*;
-
-        fn feature_collection_string() -> String {
-            json!({
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                      "type": "Feature",
-                      "geometry": {
-                        "type": "Point",
-                        "coordinates": [125.6, 10.1]
-                      },
-                      "properties": {
-                        "name": "Dinagat Islands",
-                        "age": 123
-                      }
-                    },
-                    {
-                      "type": "Feature",
-                      "geometry": {
-                        "type": "Point",
-                        "coordinates": [2.3, 4.5]
-                      },
-                      "properties": {
-                        "name": "Neverland",
-                        "age": 456
-                      }
-                    }
-                ]
-            })
-            .to_string()
-        }
+        use crate::de::tests::feature_collection;
 
         #[test]
         fn geometry_field_without_helper() {
@@ -434,7 +404,7 @@ mod tests {
         }
 
         #[test]
-        fn feature_collection() {
+        fn serialize_feature_collection() {
             #[derive(Serialize)]
             struct MyStruct {
                 #[serde(serialize_with = "serialize_geometry")]
@@ -460,7 +430,7 @@ mod tests {
                 to_feature_collection_string(&my_structs).expect("valid serialization");
 
             // Order might vary, so re-parse to do a semantic comparison of the content.
-            let expected_output = JsonValue::from_str(&feature_collection_string()).unwrap();
+            let expected_output = feature_collection();
             let actual_output = JsonValue::from_str(&output_string).unwrap();
 
             assert_eq!(actual_output, expected_output);
