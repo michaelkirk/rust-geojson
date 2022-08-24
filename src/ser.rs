@@ -267,9 +267,10 @@ where
             let bytes = serde_json::to_vec(self.feature).expect("TODO");
             serde_json::from_slice(&bytes).expect("TODO")
         };
+
         let geometry = json_object.remove("geometry").unwrap();
 
-        let mut map = serializer.serialize_map(None)?;
+        let mut map = serializer.serialize_map(Some(3))?;
         map.serialize_entry("type", "Feature")?;
         map.serialize_entry("geometry", &geometry)?;
         map.serialize_entry("properties", &json_object)?;
@@ -278,7 +279,7 @@ where
 }
 
 #[inline]
-pub fn to_feature_collection_writer<W, T>(writer: W, values: &[T]) -> Result<()>
+pub fn to_feature_collection_writer<W, T>(writer: W, features: &[T]) -> Result<()>
 where
     W: io::Write,
     T: Serialize,
@@ -288,8 +289,7 @@ where
     let mut ser = serde_json::Serializer::new(writer);
     let mut map = ser.serialize_map(Some(2))?;
     map.serialize_entry("type", "FeatureCollection")?;
-    let features = Features::new(values);
-    map.serialize_entry("features", &features)?;
+    map.serialize_entry("features", &Features::new(features))?;
     map.end()?;
     Ok(())
 }
