@@ -1,13 +1,14 @@
 use crate::{JsonObject, Result};
 use serde::{Serialize, Serializer};
 
-/// Serialize the given data structure as a String of JSON.
+/// Serialize the given data structure as a String of GeoJSON.
+///
+/// Note that T must have a column called "geometry".
 ///
 /// # Errors
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail, or if `T` contains a map with non-string keys.
-#[inline]
 pub fn to_feature_string<T>(value: &T) -> Result<String>
 where
     T: Serialize,
@@ -38,7 +39,6 @@ where
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail, or if `T` contains a map with non-string keys.
-#[inline]
 pub fn to_feature_vec<T>(value: &T) -> Result<Vec<u8>>
 where
     T: Serialize,
@@ -48,7 +48,6 @@ where
     Ok(writer)
 }
 
-#[inline]
 pub fn to_feature_collection_vec<T>(values: &[T]) -> Result<Vec<u8>>
 where
     T: Serialize,
@@ -66,7 +65,6 @@ use std::io;
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail, or if `T` contains a map with non-string keys.
-#[inline]
 pub fn to_feature_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
     W: io::Write,
@@ -144,6 +142,16 @@ where
             serde_json::from_slice(&bytes)
                 .map_err(|e| S::Error::custom(format!("unable to roundtrip from json: {}", e)))?
         };
+
+        if !json_object.contains_key("geometry") {
+            // Currently it's *required* that the struct's geometry field be named `geometry`.
+            //
+            // A likely failure case for users is naming it anything else, e.g. `point: geo::Point`.
+            //
+            // We could just silently blunder on and set `geometry` to None in that case, but
+            // printing a specific error message seems more likely to be helpful.
+            return Err(S::Error::custom(format!("missing `geometry` field")));
+        }
         let geometry = json_object.remove("geometry");
 
         use serde::ser::SerializeMap;
@@ -155,7 +163,6 @@ where
     }
 }
 
-#[inline]
 pub fn to_feature_collection_writer<W, T>(writer: W, features: &[T]) -> Result<()>
 where
     W: io::Write,
@@ -252,7 +259,7 @@ mod tests {
         }
 
         #[test]
-        fn with_no_geom() {
+        fn with_none_geom() {
             let my_feature = {
                 let geometry = None;
                 let name = "burbs".to_string();
@@ -262,6 +269,55 @@ mod tests {
             let expected_output_json = json!({
                 "type": "Feature",
                 "geometry": null,
+                "properties": {
+                    "name": "burbs"
+                }
+            });
+
+            let actual_output = to_feature_string(&my_feature).unwrap();
+            let actual_output_json = JsonValue::from_str(&actual_output).unwrap();
+            assert_eq!(actual_output_json, expected_output_json);
+        }
+
+        #[test]
+        fn without_geom_field() {
+            #[derive(Serialize)]
+            struct MyStructWithoutGeom {
+                // geometry: Option<crate::Geometry>,
+                name: String,
+            }
+            let my_feature = {
+                let name = "burbs".to_string();
+                MyStructWithoutGeom { name }
+            };
+
+            let actual_output = to_feature_string(&my_feature).unwrap_err();
+            let error_message = actual_output.to_string();
+
+            // BRITTLE: we'll need to update this test if the error message changes.
+            assert!(error_message.contains("missing"));
+            assert!(error_message.contains("geometry"));
+        }
+
+        #[test]
+        fn serializes_whatever_geometry() {
+            #[derive(Serialize)]
+            struct MyStructWithWeirdGeom {
+                // This isn't a valid geometry representation, but we don't really have a way to "validate" it
+                // so serde will serialize whatever. This test exists just to document current behavior
+                // not that it's exactly desirable.
+                geometry: Vec<u32>,
+                name: String,
+            }
+            let my_feature = {
+                let geometry = vec![1, 2, 3];
+                let name = "burbs".to_string();
+                MyStructWithWeirdGeom { geometry, name }
+            };
+
+            let expected_output_json = json!({
+                "type": "Feature",
+                "geometry": [1, 2, 3],
                 "properties": {
                     "name": "burbs"
                 }
