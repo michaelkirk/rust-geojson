@@ -57,7 +57,7 @@ mod tests {
                 age: 123,
             };
 
-            let expected_string = serde_json::json!({
+            let expected_output = serde_json::json!({
               "type": "Feature",
               "geometry": {
                 "type": "Point",
@@ -67,11 +67,13 @@ mod tests {
                 "name": "Dinagat Islands",
                 "age": 123
               }
-            })
-            .to_string();
-            let output_string = to_feature_string(&my_struct).expect("valid serialization");
+            });
 
-            assert_eq!(output_string, expected_string);
+            // Order might vary, so re-parse to do a semantic comparison of the content.
+            let output_string = to_feature_string(&my_struct).expect("valid serialization");
+            let actual_output = JsonValue::from_str(&output_string).unwrap();
+
+            assert_eq!(actual_output, expected_output);
         }
 
         #[test]
@@ -115,10 +117,10 @@ mod tests {
                 to_feature_collection_string(&my_structs).expect("valid serialization");
 
             // Order might vary, so re-parse to do a semantic comparison of the content.
-            let expected = JsonValue::from_str(&feature_collection_string()).unwrap();
-            let output = JsonValue::from_str(&output_string).unwrap();
+            let expected_output = JsonValue::from_str(&feature_collection_string()).unwrap();
+            let actual_output = JsonValue::from_str(&output_string).unwrap();
 
-            assert_eq!(output, expected);
+            assert_eq!(actual_output, expected_output);
         }
     }
 }
@@ -197,31 +199,9 @@ where
     W: io::Write,
     T: Serialize,
 {
-    let mut tmp = vec![];
-    let mut ser = serde_json::Serializer::new(&mut tmp);
-
-    value.serialize(&mut ser).unwrap();
-    let json_string = String::from_utf8(tmp).expect("valid utf-8");
-
-    use std::str::FromStr;
-    let mut properties =
-        crate::util::expect_owned_object(crate::JsonValue::from_str(&json_string)?)?;
-
-    use std::convert::TryFrom;
-    let geometry_object = properties.remove("geometry").unwrap();
-    let geometry = crate::Geometry::try_from(geometry_object).unwrap();
-
-    let feature = crate::Feature {
-        bbox: None,
-        geometry: Some(geometry),
-        id: None,
-        properties: Some(properties),
-        foreign_members: None,
-    };
-
-    let mut re_ser = serde_json::Serializer::new(writer);
-    feature.serialize(&mut re_ser).unwrap();
-
+    let feature_serializer = FeatureWrapper::new(value);
+    let mut serializer = serde_json::Serializer::new(writer);
+    feature_serializer.serialize(&mut serializer)?;
     Ok(())
 }
 
