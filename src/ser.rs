@@ -123,7 +123,7 @@ mod tests {
     }
 }
 
-use crate::Result;
+use crate::{JsonObject, Result};
 use serde::{Serialize, Serializer};
 
 /// Serialize the given data structure as a String of JSON.
@@ -145,11 +145,9 @@ where
     Ok(string)
 }
 
-pub fn to_feature_collection_string<T, G, P>(values: &[T]) -> Result<String>
+pub fn to_feature_collection_string<T>(values: &[T]) -> Result<String>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     let vec = to_feature_collection_vec(values)?;
     let string = unsafe {
@@ -176,11 +174,9 @@ where
 }
 
 #[inline]
-pub fn to_feature_collection_vec<T, G, P>(values: &[T]) -> Result<Vec<u8>>
+pub fn to_feature_collection_vec<T>(values: &[T]) -> Result<Vec<u8>>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     let mut writer = Vec::with_capacity(128);
     to_feature_collection_writer(&mut writer, values)?;
@@ -188,7 +184,6 @@ where
 }
 
 use std::io;
-use std::marker::PhantomData;
 
 /// Serialize the given data structure as JSON into the IO stream.
 ///
@@ -230,47 +225,29 @@ where
     Ok(())
 }
 
-pub trait SerializableAsFeature<G, P>
-where
-    G: Serialize,
-    P: Serialize,
-{
+pub trait SerializableAsFeature<G, P> {
     fn geometry(&self) -> G;
     fn properties(&self) -> P;
 }
 
-struct Features<'a, T, G, P>
+struct Features<'a, T>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     features: &'a [T],
-    geometry: PhantomData<G>,
-    properties: PhantomData<P>,
 }
-impl<'a, T, G, P> Features<'a, T, G, P>
+impl<'a, T> Features<'a, T>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     fn new(features: &'a [T]) -> Self {
-        Self {
-            features,
-            geometry: PhantomData,
-            properties: PhantomData,
-        }
+        Self { features }
     }
 }
 
-struct FeatureSerializer;
-
-impl<'a, T, G, P> serde::Serialize for Features<'a, T, G, P>
+impl<'a, T> serde::Serialize for Features<'a, T>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -285,63 +262,46 @@ where
     }
 }
 
-struct FeatureWrapper<'t, T, G, P> {
+struct FeatureWrapper<'t, T> {
     feature: &'t T,
-    geometry: PhantomData<G>,
-    properties: PhantomData<P>,
 }
 
-impl<'t, T, G, P> FeatureWrapper<'t, T, G, P> {
+impl<'t, T> FeatureWrapper<'t, T> {
     fn new(feature: &'t T) -> Self {
-        Self {
-            feature,
-            geometry: PhantomData,
-            properties: PhantomData,
-        }
+        Self { feature }
     }
 }
 
-impl<T, G, P> FeatureWrapper<'_, T, G, P>
+impl<T> Serialize for FeatureWrapper<'_, T>
 where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
-{
-    fn geometry(&self) -> G {
-        self.feature.geometry()
-    }
-
-    fn properties(&self) -> P {
-        self.feature.properties()
-    }
-}
-
-impl<T, G, P> Serialize for FeatureWrapper<'_, T, G, P>
-where
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         use serde::ser::SerializeMap;
+        // PERF: this is like a double serde-serde just to juggle some fields around.
+        // How can we skip this?
+        let mut json_object: JsonObject = {
+            let bytes = serde_json::to_vec(self.feature).expect("TODO");
+            serde_json::from_slice(&bytes).expect("TODO")
+        };
+        let geometry = json_object.remove("geometry").unwrap();
+
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("type", "Feature")?;
-        map.serialize_entry("geometry", &self.geometry())?;
-        map.serialize_entry("properties", &self.properties())?;
+        map.serialize_entry("geometry", &geometry)?;
+        map.serialize_entry("properties", &json_object)?;
         map.end()
     }
 }
 
 #[inline]
-pub fn to_feature_collection_writer<W, T, G, P>(writer: W, values: &[T]) -> Result<()>
+pub fn to_feature_collection_writer<W, T>(writer: W, values: &[T]) -> Result<()>
 where
     W: io::Write,
-    T: SerializableAsFeature<G, P>,
-    G: Serialize,
-    P: Serialize,
+    T: Serialize,
 {
     use serde::ser::SerializeMap;
 
