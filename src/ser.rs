@@ -1,5 +1,8 @@
 use crate::{JsonObject, Result};
-use serde::{Serialize, Serializer};
+
+use serde::{ser::Error, Serialize, Serializer};
+
+use std::io;
 
 /// Serialize the given data structure as a String of GeoJSON.
 ///
@@ -57,8 +60,6 @@ where
     Ok(writer)
 }
 
-use std::io;
-
 /// Serialize the given data structure as JSON into the IO stream.
 ///
 /// # Errors
@@ -76,17 +77,13 @@ where
     Ok(())
 }
 
-pub trait SerializableAsFeature<G, P> {
-    fn geometry(&self) -> G;
-    fn properties(&self) -> P;
-}
-
 struct Features<'a, T>
 where
     T: Serialize,
 {
     features: &'a [T],
 }
+
 impl<'a, T> Features<'a, T>
 where
     T: Serialize,
@@ -122,8 +119,6 @@ impl<'t, T> FeatureWrapper<'t, T> {
         Self { feature }
     }
 }
-
-use serde::ser::Error;
 
 impl<T> Serialize for FeatureWrapper<'_, T>
 where
@@ -178,7 +173,7 @@ where
     Ok(())
 }
 
-fn serialize_geometry<IG, S>(geometry: IG, ser: S) -> std::result::Result<S::Ok, S::Error>
+pub fn serialize_geometry<IG, S>(geometry: IG, ser: S) -> std::result::Result<S::Ok, S::Error>
 where
     IG: std::convert::TryInto<crate::Geometry>,
     S: serde::Serializer,
@@ -192,8 +187,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{JsonObject, JsonValue};
+    use crate::JsonValue;
+
     use serde_json::json;
+
     use std::str::FromStr;
 
     #[test]
@@ -383,10 +380,10 @@ mod tests {
                 age: 123,
             };
 
-            let expected_invalid_output = serde_json::json!({
+            let expected_invalid_output = json!({
               "type": "Feature",
               // This isn't a valid geojson-Geometry. This behavior probably isn't desirable, but this
-              // test documents the current behavior of what happens if the users forgets "geometry"
+              // test documents the current behavior of what happens if the users forgets "serialize_geometry"
               "geometry": { "x": 125.6, "y": 10.1 },
               "properties": {
                 "name": "Dinagat Islands",
@@ -417,7 +414,7 @@ mod tests {
                 age: 123,
             };
 
-            let expected_output = serde_json::json!({
+            let expected_output = json!({
               "type": "Feature",
               "geometry": {
                 "type": "Point",
@@ -444,19 +441,6 @@ mod tests {
                 geometry: geo_types::Point<f64>,
                 name: String,
                 age: u64,
-            }
-
-            impl SerializableAsFeature<crate::Geometry, crate::JsonObject> for MyStruct {
-                fn geometry(&self) -> crate::Geometry {
-                    (&self.geometry).into()
-                }
-
-                fn properties(&self) -> crate::JsonObject {
-                    let mut map = JsonObject::new();
-                    map.insert("name".to_string(), self.name.clone().into());
-                    map.insert("age".to_string(), self.age.into());
-                    map
-                }
             }
 
             let my_structs = vec![
