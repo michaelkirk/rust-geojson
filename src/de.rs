@@ -7,192 +7,6 @@ use std::marker::PhantomData;
 
 use serde::de::{Deserialize, Deserializer, Error, IntoDeserializer};
 
-pub struct FeatureCollectionVisitor;
-
-impl FeatureCollectionVisitor {
-    fn new() -> Self {
-        Self
-    }
-}
-
-impl<'de> serde::de::Visitor<'de> for FeatureCollectionVisitor {
-    type Value = Vec<JsonValue>;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "a valid GeoJSON Feature object")
-    }
-
-    fn visit_map<A>(self, mut map_access: A) -> std::result::Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        let mut has_feature_collection_type = false;
-        let mut features = None;
-        while let Some((key, value)) = map_access.next_entry::<String, JsonValue>()? {
-            if key == "type" {
-                if value == JsonValue::String("FeatureCollection".to_string()) {
-                    has_feature_collection_type = true;
-                } else {
-                    return Err(Error::custom("invalid type for feature collection"));
-                }
-            } else if key == "features" {
-                if let JsonValue::Array(value) = value {
-                    if features.is_some() {
-                        return Err(Error::custom(
-                            "Encountered more than one list of `features`",
-                        ));
-                    }
-                    features = Some(value);
-                } else {
-                    return Err(Error::custom("`features` had unexpected value"));
-                }
-            } else {
-                return Err(Error::custom(
-                    "foreign members are not handled by FeatureCollection deserializer",
-                ));
-            }
-        }
-
-        if let Some(features) = features {
-            if has_feature_collection_type {
-                Ok(features)
-            } else {
-                Err(Error::custom("No `type` field was found"))
-            }
-        } else {
-            Err(Error::custom("No `features` field was found"))
-        }
-    }
-}
-
-struct FeatureVisitor<D> {
-    _marker: PhantomData<D>,
-}
-
-impl<D> FeatureVisitor<D> {
-    fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'de, D> serde::de::Visitor<'de> for FeatureVisitor<D>
-where
-    D: Deserialize<'de>,
-{
-    type Value = D;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "a valid GeoJSON Feature object")
-    }
-
-    fn visit_map<A>(self, mut map_access: A) -> std::result::Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        let mut has_feature_type = false;
-        use std::collections::HashMap;
-        let mut hash_map: HashMap<String, JsonValue> = HashMap::new();
-
-        while let Some((key, value)) = map_access.next_entry::<String, JsonValue>()? {
-            if key == "type" {
-                if value.as_str() == Some("Feature") {
-                    has_feature_type = true;
-                } else {
-                    return Err(Error::custom(
-                        "GeoJSON Feature had a `type` other than \"Feature\"",
-                    ));
-                }
-            } else if key == "geometry" {
-                if let JsonValue::Object(_) = value {
-                    hash_map.insert("geometry".to_string(), value);
-                } else {
-                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
-                }
-            } else if key == "properties" {
-                if let JsonValue::Object(properties) = value {
-                    // flatten properties onto struct
-                    for (prop_key, prop_value) in properties {
-                        hash_map.insert(prop_key, prop_value);
-                    }
-                } else {
-                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
-                }
-            } else {
-                return Err(Error::custom(
-                    "foreign members are not handled by FeatureCollection deserializer",
-                ));
-            }
-        }
-
-        if has_feature_type {
-            // What do I actually do here? serde-transcode? or create a new MapAccess or Struct that
-            // has the fields needed by a child visitor - perhaps using serde::de::value::MapAccessDeserializer?
-            // use serde::de::value::MapAccessDeserializer;
-            let d2 = hash_map.into_deserializer();
-            let result =
-                Deserialize::deserialize(d2).map_err(|e| Error::custom(format!("{}", e)))?;
-            Ok(result)
-        } else {
-            return Err(Error::custom(
-                "A GeoJSON Feature must have a `type: \"Feature\"` field, but found none.",
-            ));
-        }
-    }
-}
-
-pub fn deserialize_features_from_feature_collection<'de>(
-    feature_collection_reader: impl Read,
-) -> impl Iterator<Item = Result<Feature>> {
-    FeatureReader::from_reader(feature_collection_reader).features()
-}
-
-/// Deserialize a single GeoJSON Feature into your custom struct.
-///
-/// It's more common to deserialize a FeatureCollection than a single feature. If you're looking to
-/// do that, see [`deserialize_feature_collection`] instead.
-///
-/// Your struct must implement or derive `serde::Deserialize`.
-///
-/// # Examples
-#[cfg_attr(feature = "geo-types", doc = "```")]
-#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
-/// use serde::Deserialize;
-/// use geojson::de::deserialize_geometry;
-///
-/// #[derive(serde::Deserialize)]
-/// struct MyStruct {
-///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
-///     // geometry representation other than geojson::Geometry
-///     #[serde(deserialize_with = "deserialize_geometry")]
-///     geometry: geo_types::Point<f64>,
-///     name: String,
-/// }
-///
-/// let feature_str = r#"{
-///     "type": "Feature",
-///     "geometry": { "type": "Point", "coordinates": [11.1, 22.2] },
-///     "properties": { "name": "Downtown" }
-/// }"#;
-/// let reader = feature_str.as_bytes();
-///
-/// // build your struct from GeoJSON
-/// let my_struct = geojson::de::deserialize_single_feature::<MyStruct>(reader).expect("valid geojson for MyStruct");
-///
-/// assert_eq!(my_struct.name, "Downtown");
-/// assert_eq!(my_struct.geometry.x(), 11.1);
-/// ```
-pub fn deserialize_single_feature<'de, T>(feature_reader: impl Read) -> Result<T>
-where
-    T: Deserialize<'de>,
-{
-    let feature_value: JsonValue = serde_json::from_reader(feature_reader)?;
-    let deserializer = feature_value.into_deserializer();
-    let visitor = FeatureVisitor::new();
-    Ok(deserializer.deserialize_map(visitor)?)
-}
-
 /// Deserialize a GeoJSON FeatureCollection into your custom structs.
 ///
 /// Your struct must implement or derive `serde::Deserialize`.
@@ -341,6 +155,191 @@ where
     geojson_geometry
         .try_into()
         .map_err(|err| Error::custom(format!("unable to convert from geojson Geometry: {}", err)))
+}
+pub fn deserialize_features_from_feature_collection<'de>(
+    feature_collection_reader: impl Read,
+) -> impl Iterator<Item = Result<Feature>> {
+    FeatureReader::from_reader(feature_collection_reader).features()
+}
+
+/// Deserialize a single GeoJSON Feature into your custom struct.
+///
+/// It's more common to deserialize a FeatureCollection than a single feature. If you're looking to
+/// do that, see [`deserialize_feature_collection`] instead.
+///
+/// Your struct must implement or derive `serde::Deserialize`.
+///
+/// # Examples
+#[cfg_attr(feature = "geo-types", doc = "```")]
+#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+/// use serde::Deserialize;
+/// use geojson::de::deserialize_geometry;
+///
+/// #[derive(serde::Deserialize)]
+/// struct MyStruct {
+///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
+///     // geometry representation other than geojson::Geometry
+///     #[serde(deserialize_with = "deserialize_geometry")]
+///     geometry: geo_types::Point<f64>,
+///     name: String,
+/// }
+///
+/// let feature_str = r#"{
+///     "type": "Feature",
+///     "geometry": { "type": "Point", "coordinates": [11.1, 22.2] },
+///     "properties": { "name": "Downtown" }
+/// }"#;
+/// let reader = feature_str.as_bytes();
+///
+/// // build your struct from GeoJSON
+/// let my_struct = geojson::de::deserialize_single_feature::<MyStruct>(reader).expect("valid geojson for MyStruct");
+///
+/// assert_eq!(my_struct.name, "Downtown");
+/// assert_eq!(my_struct.geometry.x(), 11.1);
+/// ```
+pub fn deserialize_single_feature<'de, T>(feature_reader: impl Read) -> Result<T>
+where
+    T: Deserialize<'de>,
+{
+    let feature_value: JsonValue = serde_json::from_reader(feature_reader)?;
+    let deserializer = feature_value.into_deserializer();
+    let visitor = FeatureVisitor::new();
+    Ok(deserializer.deserialize_map(visitor)?)
+}
+
+pub struct FeatureCollectionVisitor;
+
+impl FeatureCollectionVisitor {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for FeatureCollectionVisitor {
+    type Value = Vec<JsonValue>;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        write!(formatter, "a valid GeoJSON Feature object")
+    }
+
+    fn visit_map<A>(self, mut map_access: A) -> std::result::Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut has_feature_collection_type = false;
+        let mut features = None;
+        while let Some((key, value)) = map_access.next_entry::<String, JsonValue>()? {
+            if key == "type" {
+                if value == JsonValue::String("FeatureCollection".to_string()) {
+                    has_feature_collection_type = true;
+                } else {
+                    return Err(Error::custom("invalid type for feature collection"));
+                }
+            } else if key == "features" {
+                if let JsonValue::Array(value) = value {
+                    if features.is_some() {
+                        return Err(Error::custom(
+                            "Encountered more than one list of `features`",
+                        ));
+                    }
+                    features = Some(value);
+                } else {
+                    return Err(Error::custom("`features` had unexpected value"));
+                }
+            } else {
+                return Err(Error::custom(
+                    "foreign members are not handled by FeatureCollection deserializer",
+                ));
+            }
+        }
+
+        if let Some(features) = features {
+            if has_feature_collection_type {
+                Ok(features)
+            } else {
+                Err(Error::custom("No `type` field was found"))
+            }
+        } else {
+            Err(Error::custom("No `features` field was found"))
+        }
+    }
+}
+
+struct FeatureVisitor<D> {
+    _marker: PhantomData<D>,
+}
+
+impl<D> FeatureVisitor<D> {
+    fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'de, D> serde::de::Visitor<'de> for FeatureVisitor<D>
+where
+    D: Deserialize<'de>,
+{
+    type Value = D;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        write!(formatter, "a valid GeoJSON Feature object")
+    }
+
+    fn visit_map<A>(self, mut map_access: A) -> std::result::Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut has_feature_type = false;
+        use std::collections::HashMap;
+        let mut hash_map: HashMap<String, JsonValue> = HashMap::new();
+
+        while let Some((key, value)) = map_access.next_entry::<String, JsonValue>()? {
+            if key == "type" {
+                if value.as_str() == Some("Feature") {
+                    has_feature_type = true;
+                } else {
+                    return Err(Error::custom(
+                        "GeoJSON Feature had a `type` other than \"Feature\"",
+                    ));
+                }
+            } else if key == "geometry" {
+                if let JsonValue::Object(_) = value {
+                    hash_map.insert("geometry".to_string(), value);
+                } else {
+                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
+                }
+            } else if key == "properties" {
+                if let JsonValue::Object(properties) = value {
+                    // flatten properties onto struct
+                    for (prop_key, prop_value) in properties {
+                        hash_map.insert(prop_key, prop_value);
+                    }
+                } else {
+                    return Err(Error::custom("GeoJSON Feature had a unexpected geometry"));
+                }
+            } else {
+                return Err(Error::custom(
+                    "foreign members are not handled by FeatureCollection deserializer",
+                ));
+            }
+        }
+
+        if has_feature_type {
+            // What do I actually do here? serde-transcode? or create a new MapAccess or Struct that
+            // has the fields needed by a child visitor - perhaps using serde::de::value::MapAccessDeserializer?
+            // use serde::de::value::MapAccessDeserializer;
+            let d2 = hash_map.into_deserializer();
+            let result =
+                Deserialize::deserialize(d2).map_err(|e| Error::custom(format!("{}", e)))?;
+            Ok(result)
+        } else {
+            return Err(Error::custom(
+                "A GeoJSON Feature must have a `type: \"Feature\"` field, but found none.",
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
