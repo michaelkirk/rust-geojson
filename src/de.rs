@@ -148,6 +148,41 @@ pub fn deserialize_features_from_feature_collection<'de>(
     FeatureReader::from_reader(feature_collection_reader).features()
 }
 
+/// Deserialize a single GeoJSON Feature into your custom struct.
+///
+/// It's more common to deserialize a FeatureCollection than a single feature. If you're looking to
+/// do that, see [`deserialize_feature_collection`] instead.
+///
+/// Your struct must implement or derive `serde::Deserialize`.
+///
+/// # Examples
+#[cfg_attr(feature = "geo-types", doc = "```")]
+#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+/// use serde::Deserialize;
+/// use geojson::de::deserialize_geometry;
+///
+/// #[derive(serde::Deserialize)]
+/// struct MyStruct {
+///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
+///     // geometry representation other than geojson::Geometry
+///     #[serde(deserialize_with = "deserialize_geometry")]
+///     geometry: geo_types::Point<f64>,
+///     name: String,
+/// }
+///
+/// let feature_str = r#"{
+///     "type": "Feature",
+///     "geometry": { "type": "Point", "coordinates": [11.1, 22.2] },
+///     "properties": { "name": "Downtown" }
+/// }"#;
+/// let reader = feature_str.as_bytes();
+///
+/// // build your struct from GeoJSON
+/// let my_struct = geojson::de::deserialize_single_feature::<MyStruct>(reader).expect("valid geojson for MyStruct");
+///
+/// assert_eq!(my_struct.name, "Downtown");
+/// assert_eq!(my_struct.geometry.x(), 11.1);
+/// ```
 pub fn deserialize_single_feature<'de, T>(feature_reader: impl Read) -> Result<T>
 where
     T: Deserialize<'de>,
@@ -158,6 +193,59 @@ where
     Ok(deserializer.deserialize_map(visitor)?)
 }
 
+/// Deserialize a GeoJSON FeatureCollection into your custom structs.
+///
+/// Your struct must implement or derive `serde::Deserialize`.
+///
+/// You must use the `deserialize_geometry` helper if you are using geo_types or some other geometry
+/// representation other than geojson::Geometry.
+///
+/// # Examples
+#[cfg_attr(feature = "geo-types", doc = "```")]
+#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+/// use serde::Deserialize;
+/// use geojson::de::deserialize_geometry;
+///
+/// #[derive(serde::Deserialize)]
+/// struct MyStruct {
+///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
+///     // geometry representation other than geojson::Geometry
+///     #[serde(deserialize_with = "deserialize_geometry")]
+///     geometry: geo_types::Point<f64>,
+///     name: String,
+/// }
+///
+/// let feature_collection_str = r#"{
+///     "type": "FeatureCollection",
+///     "features": [
+///         {
+///             "type": "Feature",
+///             "geometry": { "type": "Point", "coordinates": [11.1, 22.2] },
+///             "properties": { "name": "Downtown" }
+///         },
+///         {
+///             "type": "Feature",
+///             "geometry": { "type": "Point", "coordinates": [33.3, 44.4] },
+///             "properties": { "name": "Uptown" }
+///         }
+///     ]
+/// }"#;
+/// let reader = feature_collection_str.as_bytes();
+///
+/// // enumerate over the features in the feature collection
+/// for (idx, feature_result) in geojson::de::deserialize_feature_collection::<MyStruct>(reader).unwrap().enumerate() {
+///     let my_struct = feature_result.expect("valid geojson for MyStruct");
+///     if idx == 0 {
+///         assert_eq!(my_struct.name, "Downtown");
+///         assert_eq!(my_struct.geometry.x(), 11.1);
+///     } else if idx == 1 {
+///         assert_eq!(my_struct.name, "Uptown");
+///         assert_eq!(my_struct.geometry.x(), 33.3);
+///     } else {
+///         unreachable!("there are only two features in this collection");
+///     }
+/// }
+/// ```
 pub fn deserialize_feature_collection<'de, T>(
     feature_collection_reader: impl Read,
 ) -> Result<impl Iterator<Item = Result<T>>>
@@ -181,6 +269,22 @@ where
     }))
 }
 
+/// Helper which collects `deserialize_feature_collection` into a Vec.
+///
+/// See [`deserialize_feature_collection`] for more.
+pub fn deserialize_feature_collection_str_to_vec<'de, T>(
+    feature_collection_str: &str,
+) -> Result<Vec<T>>
+where
+    T: Deserialize<'de>,
+{
+    let feature_collection_reader = feature_collection_str.as_bytes();
+    deserialize_feature_collection(feature_collection_reader)?.collect()
+}
+
+/// Helper which collects `deserialize_feature_collection` into a Vec.
+///
+/// See [`deserialize_feature_collection`] for more.
 pub fn deserialize_feature_collection_to_vec<'de, T>(
     feature_collection_reader: impl Read,
 ) -> Result<Vec<T>>
@@ -190,6 +294,43 @@ where
     deserialize_feature_collection(feature_collection_reader)?.collect()
 }
 
+/// Used with serde's `deserialize_with` to deserialize a GeoJSON formatted Geometry into any type
+/// that implements [`TryFrom<geojson::Geometry>`], such as a [`geo_types`] Geometry.
+///
+/// # Examples
+#[cfg_attr(feature = "geo-types", doc = "```")]
+#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+/// use serde::Deserialize;
+/// use geojson::de::deserialize_geometry;
+///
+/// #[derive(serde::Deserialize)]
+/// struct MyStruct {
+///     #[serde(deserialize_with = "deserialize_geometry")]
+///     geometry: geo_types::Point<f64>,
+///     name: String,
+/// }
+///
+/// let feature_collection_str = r#"{
+///     "type": "FeatureCollection",
+///     "features": [
+///         {
+///             "type": "Feature",
+///             "geometry": { "type": "Point", "coordinates": [11.1, 22.2] },
+///             "properties": { "name": "Downtown" }
+///         },
+///         {
+///             "type": "Feature",
+///             "geometry": { "type": "Point", "coordinates": [33.3, 44.4] },
+///             "properties": { "name": "Uptown" }
+///         }
+///     ]
+/// }"#;
+///
+/// let features: Vec<MyStruct> = geojson::de::deserialize_feature_collection_str_to_vec(feature_collection_str).unwrap();
+///
+/// assert_eq!(features[0].name, "Downtown");
+/// assert_eq!(features[0].geometry.x(), 11.1);
+/// ```
 pub fn deserialize_geometry<'de, D, G>(deserializer: D) -> std::result::Result<G, D::Error>
 where
     D: Deserializer<'de>,
