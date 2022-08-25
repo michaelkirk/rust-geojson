@@ -1,3 +1,87 @@
+//!
+//! To build instances of your struct from a GeoJSON String or reader, your type *must*
+//! implement or derive [`serde::Deserialize`]:
+//!
+//! ```rust, ignore
+//! #[derive(serde::Deserialize)]
+//! struct MyStruct {
+//!     ...
+//! }
+//! ```
+//!
+//! Your type *must* have a field called `geometry` and it must be `deserialized_with` [`deserialize_geometry`](crate::de::deserialize_geometry):
+//!  ```rust, ignore
+//! #[derive(serde::Deserialize)]
+//! struct MyStruct {
+//!     #[serde(serialize_with = "geojson::de::deserialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     ...
+//! }
+//! ```
+//!
+//! All fields in your struct other than `geometry` will be deserialized from the `properties` of the
+//! GeoJSON Feature.
+//!
+//! # Examples
+#![cfg_attr(feature = "geo-types", doc = "```")]
+#![cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+//! use serde::Deserialize;
+//! use geojson::de::deserialize_geometry;
+//!
+//! #[derive(Deserialize)]
+//! struct MyStruct {
+//!     // Deserialize from geojson, rather than expecting the type's default serialization
+//!     #[serde(deserialize_with = "deserialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     name: String,
+//!     population: u64
+//! }
+//!
+//! let input_geojson = serde_json::json!(
+//!     {
+//!         "type":"FeatureCollection",
+//!         "features": [
+//!             {
+//!                 "type": "Feature",
+//!                 "geometry": { "coordinates": [11.1,22.2], "type": "Point" },
+//!                 "properties": {
+//!                     "name": "Downtown",
+//!                     "population": 123
+//!                 }
+//!             },
+//!             {
+//!                 "type": "Feature",
+//!                 "geometry": { "coordinates": [33.3, 44.4], "type": "Point" },
+//!                 "properties": {
+//!                     "name": "Uptown",
+//!                     "population": 456
+//!                 }
+//!             }
+//!         ]
+//!     }
+//! ).to_string();
+//!
+//! let my_structs: Vec<MyStruct> = geojson::de::deserialize_feature_collection_str_to_vec(&input_geojson).unwrap();
+//! assert_eq!("Downtown", my_structs[0].name);
+//! assert_eq!(11.1, my_structs[0].geometry.x());
+//!
+//! assert_eq!("Uptown", my_structs[1].name);
+//! assert_eq!(33.3, my_structs[1].geometry.x());
+//! ```
+//!
+//! # Reading *and* Writing GeoJSON
+//!
+//! This module is only concerned with _reading in_ GeoJSON. If you'd also like to write GeoJSON
+//! output, you'll want to combine this with the functionality from the [`crate::ser`] module:
+//! ```ignore
+//! #[derive(serde::Serialize, serde::Deserialize)]
+//! struct MyStruct {
+//!     // Serialize as geojson, rather than using the type's default serialization
+//!     #[serde(serialize_with = "serialize_geometry", deserialize_with = "deserialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     ...
+//! }
+//! ```
 use crate::{Feature, FeatureReader, JsonValue, Result};
 
 use std::convert::{TryFrom, TryInto};
@@ -11,7 +95,7 @@ use serde::de::{Deserialize, Deserializer, Error, IntoDeserializer};
 ///
 /// Your struct must implement or derive `serde::Deserialize`.
 ///
-/// You must use the `deserialize_geometry` helper if you are using geo_types or some other geometry
+/// You must use the [`deserialize_geometry`] helper if you are using geo_types or some other geometry
 /// representation other than geojson::Geometry.
 ///
 /// # Examples
@@ -20,7 +104,7 @@ use serde::de::{Deserialize, Deserializer, Error, IntoDeserializer};
 /// use serde::Deserialize;
 /// use geojson::de::deserialize_geometry;
 ///
-/// #[derive(serde::Deserialize)]
+/// #[derive(Deserialize)]
 /// struct MyStruct {
 ///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
 ///     // geometry representation other than geojson::Geometry
@@ -83,7 +167,7 @@ where
     }))
 }
 
-/// Helper which collects `deserialize_feature_collection` into a Vec.
+/// Build a `Vec` of structs from a GeoJson `&str`.
 ///
 /// See [`deserialize_feature_collection`] for more.
 pub fn deserialize_feature_collection_str_to_vec<'de, T>(
@@ -96,7 +180,7 @@ where
     deserialize_feature_collection(feature_collection_reader)?.collect()
 }
 
-/// Helper which collects `deserialize_feature_collection` into a Vec.
+/// Build a `Vec` of structs from a GeoJson reader.
 ///
 /// See [`deserialize_feature_collection`] for more.
 pub fn deserialize_feature_collection_to_vec<'de, T>(
@@ -108,8 +192,8 @@ where
     deserialize_feature_collection(feature_collection_reader)?.collect()
 }
 
-/// Used with serde's `deserialize_with` to deserialize a GeoJSON formatted Geometry into any type
-/// that implements [`TryFrom<geojson::Geometry>`], such as a [`geo_types`] Geometry.
+/// [`serde::deserialize_with`](https://serde.rs/field-attrs.html#deserialize_with) helper to deserialize a GeoJSON Geometry into another type, like a
+/// [`geo_types`] Geometry.
 ///
 /// # Examples
 #[cfg_attr(feature = "geo-types", doc = "```")]
@@ -117,7 +201,7 @@ where
 /// use serde::Deserialize;
 /// use geojson::de::deserialize_geometry;
 ///
-/// #[derive(serde::Deserialize)]
+/// #[derive(Deserialize)]
 /// struct MyStruct {
 ///     #[serde(deserialize_with = "deserialize_geometry")]
 ///     geometry: geo_types::Point<f64>,
@@ -156,6 +240,10 @@ where
         .try_into()
         .map_err(|err| Error::custom(format!("unable to convert from geojson Geometry: {}", err)))
 }
+
+/// Deserialize a GeoJSON FeatureCollection into [`Feature`] structs.
+///
+/// If instead you'd like to deserialize your own structs from GeoJSON, see [`deserialize_feature_collection`].
 pub fn deserialize_features_from_feature_collection<'de>(
     feature_collection_reader: impl Read,
 ) -> impl Iterator<Item = Result<Feature>> {
@@ -175,7 +263,7 @@ pub fn deserialize_features_from_feature_collection<'de>(
 /// use serde::Deserialize;
 /// use geojson::de::deserialize_geometry;
 ///
-/// #[derive(serde::Deserialize)]
+/// #[derive(Deserialize)]
 /// struct MyStruct {
 ///     // You must use the `deserialize_geometry` helper if you are using geo_types or some other
 ///     // geometry representation other than geojson::Geometry
@@ -207,7 +295,7 @@ where
     Ok(deserializer.deserialize_map(visitor)?)
 }
 
-pub struct FeatureCollectionVisitor;
+struct FeatureCollectionVisitor;
 
 impl FeatureCollectionVisitor {
     fn new() -> Self {

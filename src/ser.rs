@@ -1,12 +1,113 @@
+//!
+//! To output your struct to GeoJSON, either as a String, bytes, or to a file, your type *must*
+//! implement or derive [`serde::Serialize`]:
+//!
+//! ```rust, ignore
+//! #[derive(serde::Serialize)]
+//! struct MyStruct {
+//!     ...
+//! }
+//! ```
+//!
+//! Your type *must* have a field called `geometry` and it must be `serialized_with` [`serialize_geometry`](crate::ser::serialize_geometry):
+//!  ```rust, ignore
+//! #[derive(serde::Serialize)]
+//! struct MyStruct {
+//!     #[serde(serialize_with = "geojson::ser::serialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     ...
+//! }
+//! ```
+//!
+//! All fields in your struct other than `geometry` will be serialized as `properties` of the
+//! GeoJSON Feature.
+//!
+//! # Examples
+#![cfg_attr(feature = "geo-types", doc = "```")]
+#![cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+//! use serde::Serialize;
+//! use geojson::ser::serialize_geometry;
+//!
+//! #[derive(Serialize)]
+//! struct MyStruct {
+//!     // Serialize as geojson, rather than using the type's default serialization
+//!     #[serde(serialize_with = "serialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     name: String,
+//!     population: u64
+//! }
+//!
+//! let my_structs = vec![
+//!     MyStruct {
+//!         geometry: geo_types::Point::new(11.1, 22.2),
+//!         name: "Downtown".to_string(),
+//!         population: 123
+//!     },
+//!     MyStruct {
+//!         geometry: geo_types::Point::new(33.3, 44.4),
+//!         name: "Uptown".to_string(),
+//!         population: 456
+//!     }
+//! ];
+//!
+//! let output_geojson = geojson::ser::to_feature_collection_string(&my_structs).unwrap();
+//!
+//! let expected_geojson = serde_json::json!(
+//!     {
+//!         "type":"FeatureCollection",
+//!         "features": [
+//!             {
+//!                 "type": "Feature",
+//!                 "geometry": { "coordinates": [11.1,22.2], "type": "Point" },
+//!                 "properties": {
+//!                     "name": "Downtown",
+//!                     "population": 123
+//!                 }
+//!             },
+//!             {
+//!                 "type": "Feature",
+//!                 "geometry": { "coordinates": [33.3, 44.4], "type": "Point" },
+//!                 "properties": {
+//!                     "name": "Uptown",
+//!                     "population": 456
+//!                 }
+//!             }
+//!         ]
+//!     }
+//! );
+//! #
+//! # // re-parse the json to do a structural comparison, rather than worry about formatting
+//! # // or other meaningless deviations in an exact String comparison.
+//! # let output_geojson: serde_json::Value = serde_json::from_str(&output_geojson).unwrap();
+//! #
+//! # assert_eq!(output_geojson, expected_geojson);
+//! ```
+//!
+//! # Reading *and* Writing GeoJSON
+//!
+//! This module is only concerned with Writing out GeoJSON. If you'd also like to reading GeoJSON,
+//! you'll want to combine this with the functionality from the [`crate::de`] module:
+//! ```ignore
+//! #[derive(serde::Serialize, serde::Deserialize)]
+//! struct MyStruct {
+//!     // Serialize as geojson, rather than using the type's default serialization
+//!     #[serde(serialize_with = "serialize_geometry", deserialize_with = "deserialize_geometry")]
+//!     geometry: geo_types::Point<f64>,
+//!     ...
+//! }
+//! ```
 use crate::{JsonObject, Result};
 
 use serde::{ser::Error, Serialize, Serializer};
 
 use std::io;
 
-/// Serialize the given data structure as a String of GeoJSON.
+/// Serialize a single data structure to a GeoJSON Feature string.
 ///
-/// Note that T must have a column called "geometry".
+/// Note that `T` must have a column called `geometry`.
+///
+/// See [`to_feature_collection_string`] if instead you'd like to serialize multiple features to a
+/// FeatureCollection.
 ///
 /// # Errors
 ///
@@ -16,7 +117,7 @@ pub fn to_feature_string<T>(value: &T) -> Result<String>
 where
     T: Serialize,
 {
-    let vec = to_feature_vec(value)?;
+    let vec = to_feature_byte_vec(value)?;
     let string = unsafe {
         // We do not emit invalid UTF-8.
         String::from_utf8_unchecked(vec)
@@ -24,25 +125,35 @@ where
     Ok(string)
 }
 
-pub fn to_feature_collection_string<T>(values: &[T]) -> Result<String>
-where
-    T: Serialize,
-{
-    let vec = to_feature_collection_vec(values)?;
-    let string = unsafe {
-        // We do not emit invalid UTF-8.
-        String::from_utf8_unchecked(vec)
-    };
-    Ok(string)
-}
-
-/// Serialize the given data structure as a JSON byte vector.
+/// Serialize elements to a GeoJSON FeatureCollection string.
+///
+/// Note that `T` must have a column called `geometry`.
 ///
 /// # Errors
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail, or if `T` contains a map with non-string keys.
-pub fn to_feature_vec<T>(value: &T) -> Result<Vec<u8>>
+pub fn to_feature_collection_string<T>(values: &[T]) -> Result<String>
+where
+    T: Serialize,
+{
+    let vec = to_feature_collection_byte_vec(values)?;
+    let string = unsafe {
+        // We do not emit invalid UTF-8.
+        String::from_utf8_unchecked(vec)
+    };
+    Ok(string)
+}
+
+/// Serialize a single data structure to a GeoJSON Feature byte vector.
+///
+/// Note that `T` must have a column called `geometry`.
+///
+/// # Errors
+///
+/// Serialization can fail if `T`'s implementation of `Serialize` decides to
+/// fail, or if `T` contains a map with non-string keys.
+pub fn to_feature_byte_vec<T>(value: &T) -> Result<Vec<u8>>
 where
     T: Serialize,
 {
@@ -51,7 +162,15 @@ where
     Ok(writer)
 }
 
-pub fn to_feature_collection_vec<T>(values: &[T]) -> Result<Vec<u8>>
+/// Serialize elements to a GeoJSON FeatureCollection byte vector.
+///
+/// Note that `T` must have a column called `geometry`.
+///
+/// # Errors
+///
+/// Serialization can fail if `T`'s implementation of `Serialize` decides to
+/// fail, or if `T` contains a map with non-string keys.
+pub fn to_feature_collection_byte_vec<T>(values: &[T]) -> Result<Vec<u8>>
 where
     T: Serialize,
 {
@@ -60,7 +179,9 @@ where
     Ok(writer)
 }
 
-/// Serialize the given data structure as JSON into the IO stream.
+/// Serialize a single data structure as a GeoJSON Feature into the IO stream.
+///
+/// Note that `T` must have a column called `geometry`.
 ///
 /// # Errors
 ///
@@ -75,6 +196,72 @@ where
     let mut serializer = serde_json::Serializer::new(writer);
     feature_serializer.serialize(&mut serializer)?;
     Ok(())
+}
+
+/// Serialize elements as a GeoJSON FeatureCollection into the IO stream.
+///
+/// Note that `T` must have a column called `geometry`.
+///
+/// # Errors
+///
+/// Serialization can fail if `T`'s implementation of `Serialize` decides to
+/// fail, or if `T` contains a map with non-string keys.
+pub fn to_feature_collection_writer<W, T>(writer: W, features: &[T]) -> Result<()>
+where
+    W: io::Write,
+    T: Serialize,
+{
+    use serde::ser::SerializeMap;
+
+    let mut ser = serde_json::Serializer::new(writer);
+    let mut map = ser.serialize_map(Some(2))?;
+    map.serialize_entry("type", "FeatureCollection")?;
+    map.serialize_entry("features", &Features::new(features))?;
+    map.end()?;
+    Ok(())
+}
+
+/// [`serde::serialize_with`](https://serde.rs/field-attrs.html#serialize_with) helper to serialize a type like a
+/// [`geo_types`], as a GeoJSON Geometry.
+///
+/// # Examples
+#[cfg_attr(feature = "geo-types", doc = "```")]
+#[cfg_attr(not(feature = "geo-types"), doc = "```ignore")]
+/// use serde::Serialize;
+/// use geojson::ser::serialize_geometry;
+///
+/// #[derive(Serialize)]
+/// struct MyStruct {
+///     // Serialize as geojson, rather than using the type's default serialization
+///     #[serde(serialize_with = "serialize_geometry")]
+///     geometry: geo_types::Point<f64>,
+///     name: String,
+/// }
+///
+/// let my_structs = vec![
+///     MyStruct {
+///         geometry: geo_types::Point::new(11.1, 22.2),
+///         name: "Downtown".to_string()
+///     },
+///     MyStruct {
+///         geometry: geo_types::Point::new(33.3, 44.4),
+///         name: "Uptown".to_string()
+///     }
+/// ];
+///
+/// let geojson_string = geojson::ser::to_feature_collection_string(&my_structs).unwrap();
+///
+/// assert!(geojson_string.contains(r#""geometry":{"coordinates":[11.1,22.2],"type":"Point"}"#));
+/// ```
+pub fn serialize_geometry<IG, S>(geometry: IG, ser: S) -> std::result::Result<S::Ok, S::Error>
+where
+    IG: std::convert::TryInto<crate::Geometry>,
+    S: serde::Serializer,
+{
+    geometry
+        .try_into()
+        .map_err(|_e| Error::custom(format!("failed to convert geometry to geojson")))
+        .and_then(|geojson_geometry| geojson_geometry.serialize(ser))
 }
 
 struct Features<'a, T>
@@ -156,32 +343,6 @@ where
         map.serialize_entry("properties", &json_object)?;
         map.end()
     }
-}
-
-pub fn to_feature_collection_writer<W, T>(writer: W, features: &[T]) -> Result<()>
-where
-    W: io::Write,
-    T: Serialize,
-{
-    use serde::ser::SerializeMap;
-
-    let mut ser = serde_json::Serializer::new(writer);
-    let mut map = ser.serialize_map(Some(2))?;
-    map.serialize_entry("type", "FeatureCollection")?;
-    map.serialize_entry("features", &Features::new(features))?;
-    map.end()?;
-    Ok(())
-}
-
-pub fn serialize_geometry<IG, S>(geometry: IG, ser: S) -> std::result::Result<S::Ok, S::Error>
-where
-    IG: std::convert::TryInto<crate::Geometry>,
-    S: serde::Serializer,
-{
-    geometry
-        .try_into()
-        .map_err(|_e| Error::custom(format!("failed to convert geometry to geojson")))
-        .and_then(|geojson_geometry| geojson_geometry.serialize(ser))
 }
 
 #[cfg(test)]
