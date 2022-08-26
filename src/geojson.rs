@@ -160,7 +160,7 @@ impl GeoJson {
     /// use std::convert::TryInto;
     /// use geojson::{Feature, GeoJson, Geometry, Value};
     /// use serde_json::json;
-    /// use tinyvec::tiny_vec;
+    /// use geojson::coord;
     ///
     /// let json_value = json!({
     ///     "type": "Feature",
@@ -179,7 +179,7 @@ impl GeoJson {
     ///     geojson,
     ///     GeoJson::Feature(Feature {
     ///         bbox: None,
-    ///         geometry: Some(Geometry::new(Value::Point(tiny_vec![102.0, 0.5]))),
+    ///         geometry: Some(Geometry::new(Value::Point(coord![102.0, 0.5]))),
     ///         id: None,
     ///         properties: None,
     ///         foreign_members: None,
@@ -394,7 +394,7 @@ impl fmt::Display for FeatureCollection {
 #[cfg(test)]
 mod tests {
     use crate::{Error, Feature, GeoJson, Geometry, Value};
-    use tinyvec::tiny_vec;
+    use crate::coord;
     use serde_json::json;
     use std::convert::TryInto;
     use std::str::FromStr;
@@ -445,7 +445,7 @@ mod tests {
             geojson,
             GeoJson::Feature(Feature {
                 bbox: None,
-                geometry: Some(Geometry::new(Value::Point(tiny_vec![102.0, 0.5]))),
+                geometry: Some(Geometry::new(Value::Point(coord![102.0, 0.5]))),
                 id: None,
                 properties: None,
                 foreign_members: None,
@@ -470,7 +470,7 @@ mod tests {
             geojson,
             GeoJson::Feature(Feature {
                 bbox: None,
-                geometry: Some(Geometry::new(Value::Point(tiny_vec![102.0, 0.5]))),
+                geometry: Some(Geometry::new(Value::Point(coord![102.0, 0.5]))),
                 id: None,
                 properties: None,
                 foreign_members: None,

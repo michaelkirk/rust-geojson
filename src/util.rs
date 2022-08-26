@@ -210,11 +210,10 @@ pub fn get_features(object: &mut JsonObject) -> Result<Vec<Feature>> {
 use tinyvec::TinyVec;
 fn json_to_position(json: &JsonValue) -> Result<Position> {
     let coords_array = expect_array(json)?;
-    let mut coords = TinyVec::with_capacity(coords_array.len());
-    for position in coords_array {
-        coords.push(expect_f64(position)?);
-    }
-    Ok(coords)
+    // TODO: errors
+    let x = expect_f64(&coords_array[0])?;
+    let y = expect_f64(&coords_array[1])?;
+    Ok(coord![x, y])
 }
 
 fn json_to_1d_positions(json: &JsonValue) -> Result<Vec<Position>> {

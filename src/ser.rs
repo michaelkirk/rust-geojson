@@ -375,7 +375,7 @@ mod tests {
     use crate::JsonValue;
 
     use serde_json::json;
-    use tinyvec::tiny_vec;
+    use crate::coord;
 
     use std::str::FromStr;
 
@@ -388,7 +388,7 @@ mod tests {
         }
 
         let my_feature = {
-            let geometry = crate::Geometry::new(crate::Value::Point(tiny_vec![0.0, 1.0]));
+            let geometry = crate::Geometry::new(crate::Value::Point(coord![0.0, 1.0]));
             let name = "burbs".to_string();
             MyStruct { geometry, name }
         };
@@ -420,7 +420,7 @@ mod tests {
         #[test]
         fn with_some_geom() {
             let my_feature = {
-                let geometry = Some(crate::Geometry::new(crate::Value::Point(tiny_vec![0.0, 1.0])));
+                let geometry = Some(crate::Geometry::new(crate::Value::Point(coord![0.0, 1.0])));
                 let name = "burbs".to_string();
                 MyStruct { geometry, name }
             };
